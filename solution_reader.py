@@ -138,7 +138,7 @@ class Delivery:
         """
         self.order_ID = order.code
         self.placement_time = order.placement_time
-        self.ready_time = order.ready_time
+        self.ready_time = order.earliest_departure_time
         self.pickup_time = order.pickup_time
         self.delivery_time = order.delivery_time
         self.courier_ID = order.delivery_courier.code
