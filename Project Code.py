@@ -252,6 +252,11 @@ add_valid_inequality_to_model = False
 add_valid_inequality_after_LP = False
 add_valid_inequality_to_callback = False
 
+suggest_solution_after_optimality_constraints = True
+
+# Logging options
+log_find_and_suggest_solutions = False
+log_constraint_additions = False
 
 def get_program_run_time() -> int:
     """Return the duration of the program as an integer."""
@@ -307,15 +312,16 @@ print(f'Created {len(Group.groups)} groups at t = {get_program_run_time()}.\n')
 print('Creating possible sequences.')
 # Create sequences delivering orders
 for restaurant in Restaurant.restaurants:
-    work_area = [Sequence([], restaurant)]
-    while len(work_area) > 0:
-        sequence = work_area[0]
-        work_area.remove(sequence)
-        for order in restaurant.orders:
-            if order not in sequence.order_list:
-                new_sequence = sequence.add_order(order)
-                if new_sequence.latest_departure_time >= new_sequence.earliest_departure_time:
-                    work_area.append(new_sequence)
+    if len(restaurant.orders) > 0:
+        work_area = [Sequence([], restaurant)]
+        while len(work_area) > 0:
+            sequence = work_area[0]
+            work_area.remove(sequence)
+            for order in restaurant.orders:
+                if order not in sequence.order_list:
+                    new_sequence = sequence.add_order(order)
+                    if new_sequence.latest_departure_time >= new_sequence.earliest_departure_time:
+                        work_area.append(new_sequence)
 print('Sequence creation complete.')
 print(f'Created {str(len(Sequence.sequences))} sequences at t = {get_program_run_time()}.\n')
 
@@ -511,13 +517,7 @@ for order in orders:
 for courier in couriers:
     couriers[courier].vtype = GRB.BINARY
 
-mdrp._proposed_solution_group_payments = {group: GRB.INFINITY for group in Group.groups}
-mdrp._proposed_solution_delivered_orders = list()
-mdrp._proposed_solution_fragments = list()
-mdrp._best_sol_val = GRB.INFINITY
-mdrp._solution_fragments = list()
-mdrp._solution_orders = list()
-
+mdrp._best_solution_value = GRB.INFINITY
 
 def Callback(model, where):
     """
@@ -544,12 +544,12 @@ def Callback(model, where):
 
     """
     if where == GRB.Callback.MIPSOL:
-        mdrp._proposed_solution_group_payments = {group: GRB.INFINITY for group in Group.groups}
-        mdrp._proposed_solution_delivered_orders = list()
-        mdrp._proposed_solution_fragments = list()
+        if log_find_and_suggest_solutions:
+            print(f'Checking new incumbent solution with value {mdrp.cbGet(GRB.Callback.MIPSOL_OBJ)}')
         # Get all activated fragments
         activated_arcs_by_group = {group: [] for group in Group.groups}
-        activated_fragments_by_group = {group: [] for group in Group.groups}
+        activated_fragments = []
+        group_payments = {group: group.get_total_on_time() * Data.MIN_PAY_PER_HOUR / 60 for group in Group.groups}
 
         for fragment in fragments:
 
@@ -561,8 +561,9 @@ def Callback(model, where):
             if mdrp.cbGetSolution(fragments[fragment]) > 0.9:
                 group = fragment.group
                 activated_arcs_by_group[group].append(fragment.arc)
-                activated_fragments_by_group[group].append(fragment)
+                activated_fragments.append(fragment)
                 
+        # start as true, if group not feasible, set variable to false
         all_groups_feasible = True
 
         # We have identified all activated fragments
@@ -649,25 +650,19 @@ def Callback(model, where):
             if ipe.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
                 # Sub-model is feasible, move to optimality cuts
                 group_payment = ipe.getObjective().getValue()
+                group_payments[group] = group_payment
                 # If optimal value greater than calculated value, add optimality cut
                 if group_payment > mdrp.cbGetSolution(payments[group]):
                     # Equation 17
-                    # print(group_payment)
-                    # print(group_arcs)
-                    # print(list(fragment for arc in group_arcs for fragment in Fragment.fragments_by_arc[arc]))
                     mdrp.cbLazy(payments[group] >= group_payment * (1 - len(group_arcs) + quicksum(fragments[fragment] for arc in group_arcs for fragment in Fragment.fragments_by_arc[arc])))
-
-                # Add fragments to suggested solution
-                for fragment in activated_fragments_by_group[group]:
-                    mdrp._proposed_solution_fragments.append(fragment)
-                    for order in fragment.order_list:
-                        mdrp._proposed_solution_delivered_orders.append(order)
-                mdrp._proposed_solution_group_payments[group] = group_payment
+                    if log_constraint_additions:
+                        print('Added optimality constraint')
 
             else:
                 # Sub-model is infeasible, move to feasibility cuts
                 ipe.computeIIS()
                 infeasible_arcs = set()
+                # Not all groups are feasible
                 all_groups_feasible = False
 
                 # Add all infeasible arcs to our collection
@@ -694,6 +689,8 @@ def Callback(model, where):
 
                 # Add a feasibility cut (eq 18)
                 mdrp.cbLazy(quicksum(fragments[fragment] for arc in infeasible_arcs for fragment in Fragment.fragments_by_arc[arc]) <= len(infeasible_arcs) - 1 + quicksum(fragments[fragment]for pred in Arc.get_pred_to_arcs(infeasible_arcs) if pred not in group_arcs for fragment in Fragment.fragments_by_arc[pred]))
+                if log_constraint_additions:
+                    print('Added feasibility cut')
 
                 # Add a valid inequality cut
                 if add_valid_inequality_to_callback:
@@ -702,64 +699,50 @@ def Callback(model, where):
                         mdrp.cbLazy(quicksum(fragments[fragment] for pred in arc.get_pred() for fragment in Fragment.fragments_by_arc[pred]) >= quicksum(fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]))
                         mdrp.cbLazy(quicksum(fragments[fragment] for succ in arc.get_succ() for fragment in Fragment.fragments_by_arc[succ]) >= quicksum(fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]))
                         VI_added += 2
-                    print(f'Added {VI_added} valid inequalities.')
-
-                # mdrp._proposed_solution_group_payments[group] = group.get_total_on_time() * Data.MIN_PAY_PER_HOUR / 60
-                
-                # Compute a valid solution from the non-infeasible arcs
-                # Start by assuming current itinerary
-                # If (arc1, arc2) from succ_timings is infeasible,
-                # remove arc2 and replace arrival location of arc1 with arrival location of arc 2
-                # Then convert all arcs to fragments using heuristic
-                # Heuristic:
-                # 1. Create an entry fragment for each courier that starts
-                # 2. Choose the path with the earliest final time
-                # 3. Choose the arc departing the location with the earliest latest departure time
-                # 4. If the arc is a home arc, close the path
-                # 5. Repeat until all arcs are used/all paths are closed (should be the same point)
-                
-                # # Replicate current itinerary
-                # arcs = list(group_arcs)
-                # # Make patches to infeasible parts of the itinerary
-                # for (arc1, arc2) in succ_timings:
-                #     if succ_timings[(arc1, arc2)].IISConstr and arc1 in arcs and arc2 in arcs:
-                #         arcs.remove(arc1)
-                #         arcs.remove(arc2)
-                #         arcs.append(Arc.get_arc_from_components(arc1.group, arc1.order_list, arc2.arrival_location))
-                #         # Since this is an IIS, fixing just one of the broken paths should be enough to fix everything
-                #         break
-                # # Use heuristic to create network
-                # # path_fragments = 
-
-        if all_groups_feasible:
-            proposed_solution_total_cost = 0
+                    if log_constraint_additions:
+                        print(f'Added {VI_added} valid inequalities.')
+            
+        if all_groups_feasible and suggest_solution_after_optimality_constraints:
+            """
+            If all groups are feasible, then we want to save the solution to
+            suggest later. We already have the fragments to be activated, and
+            we also have the orders that are delivered.
+            """
+            if log_constraint_additions:
+                print('All groups feasible, only optimality constraints added')
+            # Calculate new solution value
+            solution_value = 0
             for group in Group.groups:
-                proposed_solution_total_cost += mdrp._proposed_solution_group_payments[group]
-            proposed_solution_total_cost += 10000 * (len(Order.orders) - len(mdrp._proposed_solution_delivered_orders))
-            if proposed_solution_total_cost + 0.001 < mdrp._best_sol_val:
-                mdrp._best_sol_val = proposed_solution_total_cost
-                mdrp._solution_fragments = list(mdrp._proposed_solution_fragments)
-                mdrp._solution_orders = list(mdrp._proposed_solution_delivered_orders)
-                mdrp._solution_payments = dict(mdrp._proposed_solution_group_payments)
-        mdrp._proposed_solution_fragments = list()
-        mdrp._proposed_solution_delivered_orders = list()
-        mdrp._proposed_solution_group_payments = dict()
+                solution_value += group_payments[group]
+            for order in orders:
+                if mdrp.cbGetSolution(orders[order]) < 0.1:
+                    solution_value += 10000
+            # Compare to previous solution value
+            if solution_value + 0.0001 < mdrp._best_solution_value:
+                # Save activated fragments and delivered orders to suggest later
+                mdrp._best_fragments = activated_fragments
+                mdrp._best_solution_value = solution_value
+                if log_find_and_suggest_solutions:
+                    print(f'Saved solution of value {solution_value} to suggest later\n')
+            elif log_find_and_suggest_solutions:
+                print('Found solution worse than current best solution\n')
+        elif log_constraint_additions:
+            print('At least one group infeasible, at least one feasibility constraint added\n')
 
-    if where == GRB.Callback.MIPNODE and mdrp._best_sol_val + 0.0001 < mdrp.cbGet(GRB.Callback.MIPNODE_OBJBST):
-        for fragment in mdrp._solution_fragments:
+    """
+    In the MIPNODE stage of solving the problem, we can suggest previous
+    solutions that we have found. We check that our suggested solution is
+    better than the currently best found solution, and then suggest it to
+    Gurobi to implement into the path.
+    """
+    if where == GRB.Callback.MIPNODE and mdrp._best_solution_value + 0.0001 < mdrp.cbGet(GRB.Callback.MIPNODE_OBJBST):
+        # Give Gurobi values for all fragments according to our solution
+        for fragment in mdrp._best_fragments:
             mdrp.cbSetSolution(fragments[fragment], 1)
-        for order in Order.orders:
-            if order in mdrp._solution_orders:
-                mdrp.cbSetSolution(orders[order], 1)
-            else:
-                mdrp.cbSetSolution(orders[order], 0)
         objVal = mdrp.cbUseSolution()
-        # print(f'Suggested {mdrp._best_sol_val}, actual value: {objVal}')
-        # print(mdrp._solution_fragments)
-        # print(mdrp._solution_orders)
-        # print(mdrp._solution_payments)
-        # print()
-        mdrp._best_sol_val = GRB.INFINITY
+        if log_find_and_suggest_solutions:
+            print(f'Suggested value of {mdrp._best_solution_value}, Gurobi found {objVal}')
+            print()
 
 
 # mdrp.setParam('TuneTimeLimit', 36000)
@@ -785,7 +768,3 @@ def orders_per_courier():
             for order in fragment.order_list:
                 orders_per_courier[courier].add(order)
     return orders_per_courier
-
-
-SolutionReader.parse_solution((fragment for fragment in fragments if fragments[fragment].x > 0.9))
-SolutionWriter.write_solution()
