@@ -213,14 +213,24 @@ import math
 import itertools
 
 from gurobipy import Model, quicksum, GRB
-from classes import Data, Courier, Order, Restaurant, Group, Sequence, Arc, Node, Fragment
+from classes import (
+    Data,
+    Courier,
+    Order,
+    Restaurant,
+    Group,
+    Sequence,
+    Arc,
+    Node,
+    Fragment,
+)
 from solution_reader import SolutionReader, SolutionWriter
 
 # Epoch time from program start
 program_start_time = time.time()
-grubhub_instance = '0o50t75s1p100'
+grubhub_instance = "0o50t75s1p100"
 # The directory containing the instance data
-file_directory = 'MealDeliveryRoutingGithub/public_instances/' + grubhub_instance + '/'
+file_directory = "MealDeliveryRoutingGithub/public_instances/" + grubhub_instance + "/"
 
 node_at_order_times = True
 # TODO: implement this switch
@@ -234,13 +244,62 @@ orders_to_avoid = set()
 reduce_couriers = False
 courier_range_start = 1  # TODO: Implement this functionality
 courier_range_end = 61
-couriers_to_avoid = list(( 1, 2, 3, 4, 5, 6, 7, 8, 9,10,
-                             12,13,14,   16,17,   19,20,
-                          21,22,23,24,25,26,27,28,29,30,
-                          31,32,   34,35,36,37,38,   40,
-                          41,42,43,44,   46,47,48,   50,
-                             52,53,54,55,56,   58,59,60,
-                          61))
+couriers_to_avoid = list(
+    (
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        12,
+        13,
+        14,
+        16,
+        17,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        34,
+        35,
+        36,
+        37,
+        38,
+        40,
+        41,
+        42,
+        43,
+        44,
+        46,
+        47,
+        48,
+        50,
+        52,
+        53,
+        54,
+        55,
+        56,
+        58,
+        59,
+        60,
+        61,
+    )
+)
 # Necessary couriers: 11, 15, 18, 33, 39, 45, 49, 51, 57
 
 consider_objective = True
@@ -258,15 +317,16 @@ suggest_solution_after_optimality_constraints = True
 log_find_and_suggest_solutions = False
 log_constraint_additions = False
 
+
 def get_program_run_time() -> int:
     """Return the duration of the program as an integer."""
     return math.ceil(time.time() - program_start_time)
 
 
-with open(file_directory + 'instance_parameters.txt') as instance_parameters:
+with open(file_directory + "instance_parameters.txt") as instance_parameters:
     """Read and save the instance parameters."""
     instance_parameters.readline().strip()
-    parameters = instance_parameters.readline().strip().split('\t')
+    parameters = instance_parameters.readline().strip().split("\t")
     Data.TRAVEL_SPEED = int(parameters[0])  # metres per minute
     Data.PICKUP_SERVICE_TIME = int(parameters[1])  # minutes
     Data.DROPOFF_SERVICE_TIME = int(parameters[2])  # minutes
@@ -275,41 +335,50 @@ with open(file_directory + 'instance_parameters.txt') as instance_parameters:
     Data.PAY_PER_DELIVERY = int(parameters[5])  # dollars
     Data.MIN_PAY_PER_HOUR = int(parameters[6])  # dollars
 
-with open(file_directory + 'couriers.txt') as file:
+with open(file_directory + "couriers.txt") as file:
     lines = file.read().splitlines()[1:]
     for line in lines:
-        data = line.split('\t')
+        data = line.split("\t")
         courier_number = int(data[0][1:])
         if not reduce_couriers or courier_number not in couriers_to_avoid:
             Courier(data[0], int(data[1]), int(data[2]), int(data[3]), int(data[4]))
-print(f'{len(Courier.couriers)} total couriers')
+print(f"{len(Courier.couriers)} total couriers")
 
-with open(file_directory + 'restaurants.txt') as file:
+with open(file_directory + "restaurants.txt") as file:
     lines = file.read().splitlines()[1:]
     for line in lines:
-        data = line.split('\t')
+        data = line.split("\t")
         Restaurant(data[0], int(data[1]), int(data[2]))
-print(f'{len(Restaurant.restaurants)} total restaurants')
+print(f"{len(Restaurant.restaurants)} total restaurants")
 
-with open(file_directory + 'orders.txt') as file:
+with open(file_directory + "orders.txt") as file:
     lines = file.read().splitlines()[1:]
     for line in lines:
-        data = line.split('\t')
+        data = line.split("\t")
         if reduce_orders:
             order_number = int(data[0][1:])
             if order_number >= order_range_start and order_number <= order_range_end:
                 if order_number not in orders_to_avoid:
-                    Order(data[0], int(data[1]), int(data[2]), int(data[3]), data[4], int(data[5]))
+                    Order(
+                        data[0],
+                        int(data[1]),
+                        int(data[2]),
+                        int(data[3]),
+                        data[4],
+                        int(data[5]),
+                    )
         else:
-            Order(data[0], int(data[1]), int(data[2]), int(data[3]), data[4], int(data[5]))
-print(f'{len(Order.orders)} total orders')
-print(f'Data import complete at t = {get_program_run_time()}.\n')
+            Order(
+                data[0], int(data[1]), int(data[2]), int(data[3]), data[4], int(data[5])
+            )
+print(f"{len(Order.orders)} total orders")
+print(f"Data import complete at t = {get_program_run_time()}.\n")
 
-print('Creating courier groups.')
+print("Creating courier groups.")
 Group.group_couriers(group_by_off_time)
-print(f'Created {len(Group.groups)} groups at t = {get_program_run_time()}.\n')
+print(f"Created {len(Group.groups)} groups at t = {get_program_run_time()}.\n")
 
-print('Creating possible sequences.')
+print("Creating possible sequences.")
 # Create sequences delivering orders
 for restaurant in Restaurant.restaurants:
     if len(restaurant.orders) > 0:
@@ -320,12 +389,17 @@ for restaurant in Restaurant.restaurants:
             for order in restaurant.orders:
                 if order not in sequence.order_list:
                     new_sequence = sequence.add_order(order)
-                    if new_sequence.latest_departure_time >= new_sequence.earliest_departure_time:
+                    if (
+                        new_sequence.latest_departure_time
+                        >= new_sequence.earliest_departure_time
+                    ):
                         work_area.append(new_sequence)
-print('Sequence creation complete.')
-print(f'Created {str(len(Sequence.sequences))} sequences at t = {get_program_run_time()}.\n')
+print("Sequence creation complete.")
+print(
+    f"Created {str(len(Sequence.sequences))} sequences at t = {get_program_run_time()}.\n"
+)
 
-print('Creating possible arcs.')
+print("Creating possible arcs.")
 # Iterate through all non-empty sequences to create arcs
 # For each non-empty sequence, iterate through all groups that can arrive in time to service the sequence
 # Create an exit arc for that (group, sequence) pair
@@ -334,12 +408,28 @@ print('Creating possible arcs.')
 for sequence in Sequence.sequences:
     if sequence.order_list != []:  # Create delivery sequences
         for group in Group.groups:
-            earliest_departure_time = group.get_earliest_arrival_at(sequence.departure_location)
-            if group.off_time >= sequence.earliest_departure_time and earliest_departure_time <= sequence.latest_departure_time:
+            earliest_departure_time = group.get_earliest_arrival_at(
+                sequence.departure_location
+            )
+            if (
+                group.off_time >= sequence.earliest_departure_time
+                and earliest_departure_time <= sequence.latest_departure_time
+            ):
                 Arc(group, sequence, group)  # Creation of an exit arc
                 for restaurant in Restaurant.restaurants:
-                    earliest_arrival_time = earliest_departure_time + sequence.travel_time + restaurant.get_time_to(sequence.order_list[-1]) + (Data.DROPOFF_SERVICE_TIME + Data.PICKUP_SERVICE_TIME) / 2
-                    deliverable_orders = set(order for order in restaurant.orders if order not in sequence.order_list and order.earliest_departure_time <= group.off_time and order.latest_departure_time >= earliest_arrival_time)
+                    earliest_arrival_time = (
+                        earliest_departure_time
+                        + sequence.travel_time
+                        + restaurant.get_time_to(sequence.order_list[-1])
+                        + (Data.DROPOFF_SERVICE_TIME + Data.PICKUP_SERVICE_TIME) / 2
+                    )
+                    deliverable_orders = set(
+                        order
+                        for order in restaurant.orders
+                        if order not in sequence.order_list
+                        and order.earliest_departure_time <= group.off_time
+                        and order.latest_departure_time >= earliest_arrival_time
+                    )
                     if len(deliverable_orders) > 0:
                         Arc(group, sequence, restaurant)
     else:  # Create wait arcs
@@ -348,20 +438,30 @@ for sequence in Sequence.sequences:
         arrival_restaurant = sequence.departure_location
         for group in Group.groups:
             earliest_arrival_time = group.get_earliest_arrival_at(arrival_restaurant)
-            deliverable_orders = set(order for order in arrival_restaurant.orders if order.latest_departure_time >= earliest_arrival_time if order.earliest_departure_time <= group.off_time)
+            deliverable_orders = set(
+                order
+                for order in arrival_restaurant.orders
+                if order.latest_departure_time >= earliest_arrival_time
+                if order.earliest_departure_time <= group.off_time
+            )
             if len(deliverable_orders) > 0:
                 Arc(group, sequence, arrival_restaurant)
-print('Created main, exit and wait arcs.')
+print("Created main, exit and wait arcs.")
 for courier in Courier.couriers:  # entry arcs
     for restaurant in Restaurant.restaurants:
         earliest_arrival_time = courier.get_earliest_arrival_at(restaurant)
-        deliverable_orders = set(order for order in restaurant.orders if order.earliest_departure_time <= courier.off_time and order.latest_departure_time >= earliest_arrival_time)
+        deliverable_orders = set(
+            order
+            for order in restaurant.orders
+            if order.earliest_departure_time <= courier.off_time
+            and order.latest_departure_time >= earliest_arrival_time
+        )
         if len(deliverable_orders) > 0:
             Arc(courier.get_group(), Sequence([], courier), restaurant)
-print('Created entry arcs.')
-print(f'Created {str(len(Arc.arcs))} arcs at t = {get_program_run_time()}.\n')
+print("Created entry arcs.")
+print(f"Created {str(len(Arc.arcs))} arcs at t = {get_program_run_time()}.\n")
 
-print('Creating model nodes.')
+print("Creating model nodes.")
 # Create a node for each (group, restaurant) pair at every earliest_departure_time of orders at that restaurant.
 # Create a node for each courier at their on time.
 # Create a node for each group at the off time.
@@ -371,32 +471,52 @@ for group in Group.groups:
     off_time = group.off_time
     for restaurant in Restaurant.restaurants:
         earliest_arrival_time = group.get_earliest_arrival_at(restaurant)
-        deliverable_orders = set(order for order in restaurant.orders if order.earliest_departure_time <= off_time and order.latest_departure_time >= earliest_arrival_time)
+        deliverable_orders = set(
+            order
+            for order in restaurant.orders
+            if order.earliest_departure_time <= off_time
+            and order.latest_departure_time >= earliest_arrival_time
+        )
         if len(deliverable_orders) > 0:
-            node_start_time = int(max(earliest_arrival_time, min(order.earliest_departure_time for order in deliverable_orders)))
-            node_end_time = int(min(off_time, max(order.latest_departure_time for order in deliverable_orders)))
+            node_start_time = int(
+                max(
+                    earliest_arrival_time,
+                    min(order.earliest_departure_time for order in deliverable_orders),
+                )
+            )
+            node_end_time = int(
+                min(
+                    off_time,
+                    max(order.latest_departure_time for order in deliverable_orders),
+                )
+            )
             Node(group, restaurant, node_start_time)
             Node(group, restaurant, node_end_time)
             for order in deliverable_orders:
                 if order.earliest_departure_time > node_start_time:
                     Node(group, restaurant, order.earliest_departure_time)
-print('Restaurant nodes complete.')
+print("Restaurant nodes complete.")
 for group in Group.groups:
     Node(group, group, group.off_time)
     for courier in group.couriers:
         Node(group, courier, courier.on_time)
-print('Depot nodes complete.')
-print(f'Created {str(len(Node.nodes))} nodes at t = {get_program_run_time()}.\n')
+print("Depot nodes complete.")
+print(f"Created {str(len(Node.nodes))} nodes at t = {get_program_run_time()}.\n")
 
-print('Creating path fragments.')
+print("Creating path fragments.")
 # Creation of path fragments that travel between locations. That is, deliver
 # orders, or start at a depot and end at a restaurant
 for arc in Arc.arcs:
-    departure_nodes = Node.nodes_by_group_and_location[(arc.group, arc.departure_location)]
+    departure_nodes = Node.nodes_by_group_and_location[
+        (arc.group, arc.departure_location)
+    ]
     for node in departure_nodes:
-        if node.time >= arc.earliest_departure_time and node.time <= arc.latest_departure_time:
+        if (
+            node.time >= arc.earliest_departure_time
+            and node.time <= arc.latest_departure_time
+        ):
             Fragment(node, arc)
-print('Created path fragments.')
+print("Created path fragments.")
 
 # # Creation of path fragments from depot to restaurants
 # # If a valid depot -> restaurant fragment exists, then there is at least one node located at (group, restaurant)
@@ -417,61 +537,121 @@ print('Created path fragments.')
 #         Fragment(node, arc, False)
 # print('Created waiting path fragments.')
 Fragment.sort()
-print(f'Created {str(len(Fragment.fragments))} fragments at t = {get_program_run_time()}.\n')
+print(
+    f"Created {str(len(Fragment.fragments))} fragments at t = {get_program_run_time()}.\n"
+)
 
-print('Constructing model.')
-mdrp = Model('Meal Delivery Routing Problem')
-mdrp.setParam('LazyConstraints', 1)
-mdrp.setParam('Method', 2)
+print("Constructing model.")
+mdrp = Model("Meal Delivery Routing Problem")
+mdrp.setParam("LazyConstraints", 1)
+mdrp.setParam("Method", 2)
 # Tuning suggested parameters:
 # mdrp.setParam('DegenMoves', 1)
 # mdrp.setParam('Heuristics', 0.001)
 # mdrp.setParam('MIPFocus', 1)
 # mdrp.setParam('PrePasses', 1)
 
-print('Creating variables.')
+print("Creating variables.")
 fragments = {fragment: mdrp.addVar(ub=1) for fragment in Fragment.fragments}
 orders = {order: mdrp.addVar(ub=1) for order in Order.orders}
 payments = {group: mdrp.addVar() for group in Group.groups}
 couriers = {courier: mdrp.addVar(ub=1) for courier in Courier.couriers}
 
 if consider_objective:
-    print('Defining objective.')
+    print("Defining objective.")
     if cost_penalty_active:
-        mdrp.setObjective(quicksum(payments[group] for group in Group.groups) + 10000 * quicksum(1-orders[order] for order in Order.orders))
+        mdrp.setObjective(
+            quicksum(payments[group] for group in Group.groups)
+            + 10000 * quicksum(1 - orders[order] for order in Order.orders)
+        )
     else:
         mdrp.setObjective(quicksum(payments[group] for group in Group.groups))
 
-print('Creating constraints.')
+print("Creating constraints.")
 if consider_objective:
-    pay_for_deliveries = {group: mdrp.addConstr(
-        payments[group]
-        >= quicksum(fragments[fragment] * len(fragment.order_list) * Data.PAY_PER_DELIVERY
-                    for fragment in Fragment.fragments_by_group[group])
-        + quicksum((1-couriers[courier]) * Data.MIN_PAY_PER_HOUR
-                   * (courier.off_time - courier.on_time) / 60
-                   for courier in group.couriers))
-        for group in Group.groups}
+    pay_for_deliveries = {
+        group: mdrp.addConstr(
+            payments[group]
+            >= quicksum(
+                fragments[fragment] * len(fragment.order_list) * Data.PAY_PER_DELIVERY
+                for fragment in Fragment.fragments_by_group[group]
+            )
+            + quicksum(
+                (1 - couriers[courier])
+                * Data.MIN_PAY_PER_HOUR
+                * (courier.off_time - courier.on_time)
+                / 60
+                for courier in group.couriers
+            )
+        )
+        for group in Group.groups
+    }
 
-    pay_for_time = {group: mdrp.addConstr(
-        payments[group]
-        >= Data.MIN_PAY_PER_HOUR * group.get_total_on_time() / 60)
-        for group in Group.groups}
+    pay_for_time = {
+        group: mdrp.addConstr(
+            payments[group] >= Data.MIN_PAY_PER_HOUR * group.get_total_on_time() / 60
+        )
+        for group in Group.groups
+    }
 
-deliver_all_orders = {order: mdrp.addConstr(quicksum(fragments[fragment] for fragment in Fragment.fragments_by_order[order]) == orders[order]) for order in Order.orders}
+deliver_all_orders = {
+    order: mdrp.addConstr(
+        quicksum(fragments[fragment] for fragment in Fragment.fragments_by_order[order])
+        == orders[order]
+    )
+    for order in Order.orders
+}
 
 if cost_penalty_active is False:
-    all_orders_on = {order: mdrp.addConstr(orders[order] == 1) for order in Order.orders}
+    all_orders_on = {
+        order: mdrp.addConstr(orders[order] == 1) for order in Order.orders
+    }
 else:
-    all_orders_on = {order: mdrp.addConstr(orders[order] <= 1) for order in Order.orders}
+    all_orders_on = {
+        order: mdrp.addConstr(orders[order] <= 1) for order in Order.orders
+    }
 
-flow_in_equals_flow_out = {node: mdrp.addConstr(quicksum(fragments[fragment] for fragment in Fragment.fragments_by_arrival_node[node]) == quicksum(fragments[fragment] for fragment in Fragment.fragments_by_departure_node[node])) for node in Node.nodes if type(node.location) == Restaurant}
+flow_in_equals_flow_out = {
+    node: mdrp.addConstr(
+        quicksum(
+            fragments[fragment] for fragment in Fragment.fragments_by_arrival_node[node]
+        )
+        == quicksum(
+            fragments[fragment]
+            for fragment in Fragment.fragments_by_departure_node[node]
+        )
+    )
+    for node in Node.nodes
+    if type(node.location) == Restaurant
+}
 
-couriers_start_once = {courier: mdrp.addConstr(quicksum(fragments[fragment] for fragment in Fragment.departure_fragments_by_courier[courier]) == couriers[courier]) for courier in Courier.couriers}
+couriers_start_once = {
+    courier: mdrp.addConstr(
+        quicksum(
+            fragments[fragment]
+            for fragment in Fragment.departure_fragments_by_courier[courier]
+        )
+        == couriers[courier]
+    )
+    for courier in Courier.couriers
+}
 
 if add_valid_inequality_to_model:
-    valid_inequalities = {arc: mdrp.addConstr(quicksum(fragments[fragment] for pred in arc.get_pred() for fragment in Fragment.fragments_by_arc[pred]) >= quicksum(fragments[fragment] for fragment in Fragment.fragments_by_arc[arc])) for arc in Arc.arcs if type(arc.departure_location) != Courier}
-print(f'Model finished constructing at t = {get_program_run_time()}.\n')
+    valid_inequalities = {
+        arc: mdrp.addConstr(
+            quicksum(
+                fragments[fragment]
+                for pred in arc.get_pred()
+                for fragment in Fragment.fragments_by_arc[pred]
+            )
+            >= quicksum(
+                fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]
+            )
+        )
+        for arc in Arc.arcs
+        if type(arc.departure_location) != Courier
+    }
+print(f"Model finished constructing at t = {get_program_run_time()}.\n")
 
 while True:
 
@@ -485,8 +665,16 @@ while True:
             if fragments[fragment].x > 0.01:
                 activated_arcs.add(fragment.arc)
         for arc in activated_arcs:
-            pred_fragments = set(fragment for pred in arc.get_pred() for fragment in Fragment.fragments_by_arc[pred])
-            succ_fragments = set(fragment for succ in arc.get_succ() for fragment in Fragment.fragments_by_arc[succ])
+            pred_fragments = set(
+                fragment
+                for pred in arc.get_pred()
+                for fragment in Fragment.fragments_by_arc[pred]
+            )
+            succ_fragments = set(
+                fragment
+                for succ in arc.get_succ()
+                for fragment in Fragment.fragments_by_arc[succ]
+            )
             arc_fragments = set(fragment for fragment in Fragment.fragments_by_arc[arc])
 
             pred_values = sum(fragments[fragment].x for fragment in pred_fragments)
@@ -494,13 +682,19 @@ while True:
             arc_value = sum(fragments[fragment].x for fragment in arc_fragments)
 
             if pred_values < arc_value:
-                mdrp.addConstr(quicksum(fragments[fragment] for fragment in pred_fragments) >= quicksum(fragments[fragment] for fragment in arc_fragments))
+                mdrp.addConstr(
+                    quicksum(fragments[fragment] for fragment in pred_fragments)
+                    >= quicksum(fragments[fragment] for fragment in arc_fragments)
+                )
                 VI_added += 1
 
             if succ_values > arc_value:
-                mdrp.addConstr(quicksum(fragments[fragment] for fragment in succ_fragments) >= quicksum(fragments[fragment] for fragment in arc_fragments))
+                mdrp.addConstr(
+                    quicksum(fragments[fragment] for fragment in succ_fragments)
+                    >= quicksum(fragments[fragment] for fragment in arc_fragments)
+                )
                 VI_added += 1
-        print(f'Added {VI_added} violated valid inequalities.')
+        print(f"Added {VI_added} violated valid inequalities.")
 
     if VI_added == 0:
         break
@@ -518,6 +712,7 @@ for courier in couriers:
     couriers[courier].vtype = GRB.BINARY
 
 mdrp._best_solution_value = GRB.INFINITY
+
 
 def Callback(model, where):
     """
@@ -545,16 +740,24 @@ def Callback(model, where):
     """
     if where == GRB.Callback.MIPSOL:
         if log_find_and_suggest_solutions:
-            print(f'Checking new incumbent solution with value {mdrp.cbGet(GRB.Callback.MIPSOL_OBJ)}')
+            print(
+                f"Checking new incumbent solution with value {mdrp.cbGet(GRB.Callback.MIPSOL_OBJ)}"
+            )
         # Get all activated fragments
         activated_arcs_by_group = {group: [] for group in Group.groups}
         activated_fragments = []
-        group_payments = {group: group.get_total_on_time() * Data.MIN_PAY_PER_HOUR / 60 for group in Group.groups}
+        group_payments = {
+            group: group.get_total_on_time() * Data.MIN_PAY_PER_HOUR / 60
+            for group in Group.groups
+        }
 
         for fragment in fragments:
 
             # We don't care about any fragments that aren't moving between locations, that is, waiting fragments
-            if len(fragment.order_list) == 0 and fragment.departure_location == fragment.arrival_location:
+            if (
+                len(fragment.order_list) == 0
+                and fragment.departure_location == fragment.arrival_location
+            ):
                 continue
 
             # Add activated arcs to the list
@@ -562,7 +765,7 @@ def Callback(model, where):
                 group = fragment.group
                 activated_arcs_by_group[group].append(fragment.arc)
                 activated_fragments.append(fragment)
-                
+
         # start as true, if group not feasible, set variable to false
         all_groups_feasible = True
 
@@ -591,10 +794,22 @@ def Callback(model, where):
             for arc1, arc2 in itertools.combinations(group_arcs, 2):
 
                 # Check for the given conditions, and ensure that the courier isn't heading home and departing again.
-                if arc1.arrival_location == arc2.departure_location and arc1.earliest_departure_time + arc1.travel_time <= arc2.latest_departure_time and type(arc1.arrival_location) != Group and set(arc1.order_list).intersection(set(arc2.order_list)) == set():
+                if (
+                    arc1.arrival_location == arc2.departure_location
+                    and arc1.earliest_departure_time + arc1.travel_time
+                    <= arc2.latest_departure_time
+                    and type(arc1.arrival_location) != Group
+                    and set(arc1.order_list).intersection(set(arc2.order_list)) == set()
+                ):
                     pred[arc2].add(arc1)
                     succ[arc1].add(arc2)
-                if arc2.arrival_location == arc1.departure_location and arc2.earliest_departure_time + arc2.travel_time <= arc1.latest_departure_time and type(arc2.arrival_location) != Group and set(arc1.order_list).intersection(set(arc2.order_list)) == set():
+                if (
+                    arc2.arrival_location == arc1.departure_location
+                    and arc2.earliest_departure_time + arc2.travel_time
+                    <= arc1.latest_departure_time
+                    and type(arc2.arrival_location) != Group
+                    and set(arc1.order_list).intersection(set(arc2.order_list)) == set()
+                ):
                     pred[arc1].add(arc2)
                     succ[arc2].add(arc1)
 
@@ -604,9 +819,9 @@ def Callback(model, where):
                 # If an arc has no predecessor or successor, then it can be ignored.
                 # TODO: Confirm these arcs are only entry or exit arcs
                 if len(pred[arc]) == 0:
-                    del(pred[arc])
+                    del pred[arc]
                 if len(succ[arc]) == 0:
-                    del(succ[arc])
+                    del succ[arc]
 
             """
             The rest of this function deals with the creation and solving of the sub-model. The mathematics of this sub-model are explained in detail in sections 3.1 and 3.2 of the write-up.
@@ -617,32 +832,95 @@ def Callback(model, where):
 
             Then we have the constraints linking the variables together. Note: the equation numbers given in the code may not be correct.
             """
-            ipe = Model('Illegal Path Elimination')
-            ipe.setParam('OutputFlag', 0)
+            ipe = Model("Illegal Path Elimination")
+            ipe.setParam("OutputFlag", 0)
             courier_payments = {courier: ipe.addVar() for courier in group.couriers}
-            successors = {(arc1, arc2): ipe.addVar(vtype=GRB.BINARY) for arc2 in pred for arc1 in pred[arc2]}
+            successors = {
+                (arc1, arc2): ipe.addVar(vtype=GRB.BINARY)
+                for arc2 in pred
+                for arc1 in pred[arc2]
+            }
             timings = {arc: ipe.addVar() for arc in group_arcs}
-            assignments = {(courier, arc): ipe.addVar(vtype=GRB.BINARY) for courier in group.couriers for arc in group_arcs}
+            assignments = {
+                (courier, arc): ipe.addVar(vtype=GRB.BINARY)
+                for courier in group.couriers
+                for arc in group_arcs
+            }
 
             # Minimise cumulative courier payments (eq 8)
-            ipe.setObjective(quicksum(courier_payments[courier] for courier in group.couriers))
+            ipe.setObjective(
+                quicksum(courier_payments[courier] for courier in group.couriers)
+            )
 
             # Each courier is paid for their time (eq 9)
-            courier_time = {courier: ipe.addConstr(courier_payments[courier] >= (courier.off_time - courier.on_time) / 60 * Data.MIN_PAY_PER_HOUR) for courier in group.couriers}
+            courier_time = {
+                courier: ipe.addConstr(
+                    courier_payments[courier]
+                    >= (courier.off_time - courier.on_time) / 60 * Data.MIN_PAY_PER_HOUR
+                )
+                for courier in group.couriers
+            }
             # Each courier is paid per delivery (eq 10)
-            courier_deliveries = {courier: ipe.addConstr(courier_payments[courier] >= quicksum(assignments[courier, arc] * len(arc.order_list) * Data.PAY_PER_DELIVERY for arc in group_arcs)) for courier in group.couriers}
+            courier_deliveries = {
+                courier: ipe.addConstr(
+                    courier_payments[courier]
+                    >= quicksum(
+                        assignments[courier, arc]
+                        * len(arc.order_list)
+                        * Data.PAY_PER_DELIVERY
+                        for arc in group_arcs
+                    )
+                )
+                for courier in group.couriers
+            }
             # All activated arcs are assigned to a courier (eq 11)
-            arcs_serviced = {arc: ipe.addConstr(quicksum(assignments[courier, arc] for courier in group.couriers) == 1) for arc in group_arcs}
+            arcs_serviced = {
+                arc: ipe.addConstr(
+                    quicksum(assignments[courier, arc] for courier in group.couriers)
+                    == 1
+                )
+                for arc in group_arcs
+            }
             # All non-exit arcs must have a successor (eq 12)
-            have_succ = {arc1: ipe.addConstr(quicksum(successors[arc1, arc2] for arc2 in succ[arc1]) == 1) for arc1 in succ}
+            have_succ = {
+                arc1: ipe.addConstr(
+                    quicksum(successors[arc1, arc2] for arc2 in succ[arc1]) == 1
+                )
+                for arc1 in succ
+            }
             # All successors must start late enough for the previous to finish (eq 15)
-            succ_timings = {(arc1, arc2): ipe.addConstr(timings[arc1] + arc1.travel_time <= timings[arc2] + (1-successors[arc1, arc2]) * (arc1.latest_departure_time + arc1.travel_time - arc2.earliest_departure_time)) for (arc1, arc2) in successors}
+            succ_timings = {
+                (arc1, arc2): ipe.addConstr(
+                    timings[arc1] + arc1.travel_time
+                    <= timings[arc2]
+                    + (1 - successors[arc1, arc2])
+                    * (
+                        arc1.latest_departure_time
+                        + arc1.travel_time
+                        - arc2.earliest_departure_time
+                    )
+                )
+                for (arc1, arc2) in successors
+            }
             # If a courier services an arc, it must also service its successor (eq 16)
-            cour_serv_succ = {(arc1, arc2, courier): ipe.addConstr(assignments[courier, arc1] + successors[arc1, arc2] - 1 <= assignments[courier, arc2]) for courier in group.couriers for (arc1,  arc2) in successors}
+            cour_serv_succ = {
+                (arc1, arc2, courier): ipe.addConstr(
+                    assignments[courier, arc1] + successors[arc1, arc2] - 1
+                    <= assignments[courier, arc2]
+                )
+                for courier in group.couriers
+                for (arc1, arc2) in successors
+            }
             # An arc must be serviced after it is ready (eq 13)
-            begin_on_time = {arc: ipe.addConstr(timings[arc] >= arc.earliest_departure_time) for arc in group_arcs}
+            begin_on_time = {
+                arc: ipe.addConstr(timings[arc] >= arc.earliest_departure_time)
+                for arc in group_arcs
+            }
             # An arc must be serviced before it is too late (eq 14)
-            end_on_time = {arc: ipe.addConstr(timings[arc] <= arc.latest_departure_time) for arc in group_arcs}
+            end_on_time = {
+                arc: ipe.addConstr(timings[arc] <= arc.latest_departure_time)
+                for arc in group_arcs
+            }
 
             # After constraint generation, solve submodel
             ipe.optimize()
@@ -654,9 +932,21 @@ def Callback(model, where):
                 # If optimal value greater than calculated value, add optimality cut
                 if group_payment > mdrp.cbGetSolution(payments[group]):
                     # Equation 17
-                    mdrp.cbLazy(payments[group] >= group_payment * (1 - len(group_arcs) + quicksum(fragments[fragment] for arc in group_arcs for fragment in Fragment.fragments_by_arc[arc])))
+                    mdrp.cbLazy(
+                        payments[group]
+                        >= group_payment
+                        * (
+                            1
+                            - len(group_arcs)
+                            + quicksum(
+                                fragments[fragment]
+                                for arc in group_arcs
+                                for fragment in Fragment.fragments_by_arc[arc]
+                            )
+                        )
+                    )
                     if log_constraint_additions:
-                        print('Added optimality constraint')
+                        print("Added optimality constraint")
 
             else:
                 # Sub-model is infeasible, move to feasibility cuts
@@ -688,20 +978,54 @@ def Callback(model, where):
                         infeasible_arcs.add(arc)
 
                 # Add a feasibility cut (eq 18)
-                mdrp.cbLazy(quicksum(fragments[fragment] for arc in infeasible_arcs for fragment in Fragment.fragments_by_arc[arc]) <= len(infeasible_arcs) - 1 + quicksum(fragments[fragment]for pred in Arc.get_pred_to_arcs(infeasible_arcs) if pred not in group_arcs for fragment in Fragment.fragments_by_arc[pred]))
+                mdrp.cbLazy(
+                    quicksum(
+                        fragments[fragment]
+                        for arc in infeasible_arcs
+                        for fragment in Fragment.fragments_by_arc[arc]
+                    )
+                    <= len(infeasible_arcs)
+                    - 1
+                    + quicksum(
+                        fragments[fragment]
+                        for pred in Arc.get_pred_to_arcs(infeasible_arcs)
+                        if pred not in group_arcs
+                        for fragment in Fragment.fragments_by_arc[pred]
+                    )
+                )
                 if log_constraint_additions:
-                    print('Added feasibility cut')
+                    print("Added feasibility cut")
 
                 # Add a valid inequality cut
                 if add_valid_inequality_to_callback:
                     VI_added: int = 0
                     for arc in infeasible_arcs:
-                        mdrp.cbLazy(quicksum(fragments[fragment] for pred in arc.get_pred() for fragment in Fragment.fragments_by_arc[pred]) >= quicksum(fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]))
-                        mdrp.cbLazy(quicksum(fragments[fragment] for succ in arc.get_succ() for fragment in Fragment.fragments_by_arc[succ]) >= quicksum(fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]))
+                        mdrp.cbLazy(
+                            quicksum(
+                                fragments[fragment]
+                                for pred in arc.get_pred()
+                                for fragment in Fragment.fragments_by_arc[pred]
+                            )
+                            >= quicksum(
+                                fragments[fragment]
+                                for fragment in Fragment.fragments_by_arc[arc]
+                            )
+                        )
+                        mdrp.cbLazy(
+                            quicksum(
+                                fragments[fragment]
+                                for succ in arc.get_succ()
+                                for fragment in Fragment.fragments_by_arc[succ]
+                            )
+                            >= quicksum(
+                                fragments[fragment]
+                                for fragment in Fragment.fragments_by_arc[arc]
+                            )
+                        )
                         VI_added += 2
                     if log_constraint_additions:
-                        print(f'Added {VI_added} valid inequalities.')
-            
+                        print(f"Added {VI_added} valid inequalities.")
+
         if all_groups_feasible and suggest_solution_after_optimality_constraints:
             """
             If all groups are feasible, then we want to save the solution to
@@ -709,7 +1033,7 @@ def Callback(model, where):
             we also have the orders that are delivered.
             """
             if log_constraint_additions:
-                print('All groups feasible, only optimality constraints added')
+                print("All groups feasible, only optimality constraints added")
             # Calculate new solution value
             solution_value = 0
             for group in Group.groups:
@@ -723,11 +1047,15 @@ def Callback(model, where):
                 mdrp._best_fragments = activated_fragments
                 mdrp._best_solution_value = solution_value
                 if log_find_and_suggest_solutions:
-                    print(f'Saved solution of value {solution_value} to suggest later\n')
+                    print(
+                        f"Saved solution of value {solution_value} to suggest later\n"
+                    )
             elif log_find_and_suggest_solutions:
-                print('Found solution worse than current best solution\n')
+                print("Found solution worse than current best solution\n")
         elif log_constraint_additions:
-            print('At least one group infeasible, at least one feasibility constraint added\n')
+            print(
+                "At least one group infeasible, at least one feasibility constraint added\n"
+            )
 
     """
     In the MIPNODE stage of solving the problem, we can suggest previous
@@ -735,20 +1063,25 @@ def Callback(model, where):
     better than the currently best found solution, and then suggest it to
     Gurobi to implement into the path.
     """
-    if where == GRB.Callback.MIPNODE and mdrp._best_solution_value + 0.0001 < mdrp.cbGet(GRB.Callback.MIPNODE_OBJBST):
+    if (
+        where == GRB.Callback.MIPNODE
+        and mdrp._best_solution_value + 0.0001 < mdrp.cbGet(GRB.Callback.MIPNODE_OBJBST)
+    ):
         # Give Gurobi values for all fragments according to our solution
         for fragment in mdrp._best_fragments:
             mdrp.cbSetSolution(fragments[fragment], 1)
         objVal = mdrp.cbUseSolution()
         if log_find_and_suggest_solutions:
-            print(f'Suggested value of {mdrp._best_solution_value}, Gurobi found {objVal}')
+            print(
+                f"Suggested value of {mdrp._best_solution_value}, Gurobi found {objVal}"
+            )
             print()
 
 
 # mdrp.setParam('TuneTimeLimit', 36000)
 # mdrp.tune()
 mdrp.optimize(Callback)
-print(f'\nProgram finished running at t = {get_program_run_time()}')
+print(f"\nProgram finished running at t = {get_program_run_time()}")
 
 
 def orders_per_courier():
