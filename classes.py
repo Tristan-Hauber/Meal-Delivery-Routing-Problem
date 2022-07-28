@@ -962,6 +962,42 @@ class Arc:
         """Return repr(self)."""
         return self.__str__()
 
+    def get_arcs_for_orders(orders: List[Order], group: Group) -> List[Arc]:
+        """
+        Get all arcs that deliver orders from the given list, and are serviced by the given group.
+
+        Parameters
+        ----------
+        orders : List[Order]
+            The list of orders to retrieve arcs for.
+        group : Group
+            The courier group to retrieve arcs for.
+
+        Returns
+        -------
+        List[Arc]
+            The list of arcs containing the given orders, serviced by the given group.
+
+        """
+        order_set = set(orders)
+
+        arrival_locations = list()
+        for restaurant in Order.group_orders_by_restaurant(orders):
+            arrival_locations.append(restaurant)
+        arrival_locations.append(group)
+
+        arcs = list()
+        for key in Arc.arcs_by_group_and_order_set_and_arrival_location.keys():
+            if (
+                key[0] == group
+                and key[1].issubset(order_set)
+                and key[2] in arrival_locations
+            ):
+                for arc in Arc.arcs_by_group_and_order_set_and_arrival_location[key]:
+                    arcs.append(arc)
+
+        return arcs
+
 
 class Node:
     """
