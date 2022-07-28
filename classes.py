@@ -434,8 +434,30 @@ class Order(Location):
     def __repr__(self) -> str:
         """Return repr(self)."""
         return self.__str__()
+    
+    def group_orders_by_restaurant(orders: List[Order]) -> Dict[Restaurant, List[Order]]:
+        """
+        Group a list of orders by their departure restaurants.
 
+        Parameters
+        ----------
+        orders : List[Order]
+            The list of orders to group.
 
+        Returns
+        -------
+        Dict[Restaurant, List[Order]]
+            A dictionary of lists of orders, with the key being the common departure restaurant of the orders.
+
+        """
+        restaurants = dict()
+        for order in orders:
+            if order.departure_restaurant in restaurants:
+                restaurants[order.departure_restaurant].append(order)
+            else:
+                restaurants[order.departure_restaurant] = [order]
+        return restaurants
+        
 class Sequence:
     """
     A class containing variables and functions to do with order sequences.
