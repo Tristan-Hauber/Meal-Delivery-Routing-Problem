@@ -70,7 +70,7 @@ class Location:
         ----------
         x : int
             The x grid coordinate of the location.
-        y : TYintPE
+        y : int
             The y grid coordinate of the location.
 
         Returns
@@ -99,9 +99,13 @@ class Location:
         """
         if (self, location) not in Location.distances:
             if (location, self) in Location.distances:
-                Location.distances[(self, location)] = Location.distances[(location, self)]
+                Location.distances[(self, location)] = Location.distances[
+                    (location, self)
+                ]
             else:
-                Location.distances[(self, location)] = math.sqrt((self.x - location.x)**2 + (self.y - location.y)**2)
+                Location.distances[(self, location)] = math.sqrt(
+                    (self.x - location.x) ** 2 + (self.y - location.y) ** 2
+                )
         return Location.distances[(self, location)]
 
     def get_time_to(self, location: Location) -> int:
@@ -121,9 +125,13 @@ class Location:
         """
         if (self, location) not in Location.travel_times:
             if (location, self) in Location.travel_times:
-                Location.travel_times[(self, location)] = Location.travel_times[(location, self)]
+                Location.travel_times[(self, location)] = Location.travel_times[
+                    (location, self)
+                ]
             else:
-                Location.travel_times[(self, location)] = math.ceil(self.get_distance_to(location) / Data.TRAVEL_SPEED)
+                Location.travel_times[(self, location)] = math.ceil(
+                    self.get_distance_to(location) / Data.TRAVEL_SPEED
+                )
         return Location.travel_times[(self, location)]
 
     def get_location(self) -> Tuple[int, int]:
@@ -187,7 +195,9 @@ class Courier(Location):
 
     def get_earliest_arrival_at(self, restaurant: Restaurant) -> int:
         """Return the earliest time a courier can arrive at a location."""
-        return self.on_time + self.get_time_to(restaurant) + Data.PICKUP_SERVICE_TIME / 2
+        return (
+            self.on_time + self.get_time_to(restaurant) + Data.PICKUP_SERVICE_TIME / 2
+        )
 
     def get_group(self) -> Group:
         for group in Group.groups:
@@ -246,12 +256,14 @@ class Group(Location):
         super().__init__(0, 0)
         self.off_time = shift_end_time
         self.couriers = list()
-        self.code = f'g{len(Group.groups) + 1}'
+        self.code = f"g{len(Group.groups) + 1}"
         Group.groups.append(self)
 
     def get_earliest_arrival_at(self, restaurant: Restaurant) -> int:
         """Return the earliest arrival time at the given restaurant."""
-        return min(courier.get_earliest_arrival_at(restaurant) for courier in self.couriers)
+        return min(
+            courier.get_earliest_arrival_at(restaurant) for courier in self.couriers
+        )
 
     def get_total_on_time(self) -> int:
         """Return the cumulative minutes worked by all couriers in the group."""
@@ -288,7 +300,7 @@ class Group(Location):
 
     def __str__(self) -> str:
         """Return str(self)."""
-        return f'{self.code}'
+        return f"{self.code}"
 
     def __repr__(self) -> str:
         """Return repr(self)."""
@@ -393,7 +405,15 @@ class Order(Location):
     orders = list()
     order_by_code = dict()  # {str: Order}
 
-    def __init__(self, code: str, x: int, y: int, placement_time: int, restaurant: str, ready_time: int):
+    def __init__(
+        self,
+        code: str,
+        x: int,
+        y: int,
+        placement_time: int,
+        restaurant: str,
+        ready_time: int,
+    ):
         """
         Create a new Order instance.
 
@@ -425,7 +445,12 @@ class Order(Location):
         Order.orders.append(self)
         Order.order_by_code[code] = self
         self.departure_restaurant.orders.add(self)
-        self.latest_departure_time = self.placement_time + Data.MAX_CLICK_TO_DOOR - self.departure_restaurant.get_time_to(self) - (Data.PICKUP_SERVICE_TIME + Data.DROPOFF_SERVICE_TIME) / 2
+        self.latest_departure_time = (
+            self.placement_time
+            + Data.MAX_CLICK_TO_DOOR
+            - self.departure_restaurant.get_time_to(self)
+            - (Data.PICKUP_SERVICE_TIME + Data.DROPOFF_SERVICE_TIME) / 2
+        )
 
     def __str__(self) -> str:
         """Return str(self)."""
@@ -434,6 +459,31 @@ class Order(Location):
     def __repr__(self) -> str:
         """Return repr(self)."""
         return self.__str__()
+
+    def group_orders_by_restaurant(
+        orders: List[Order],
+    ) -> Dict[Restaurant, List[Order]]:
+        """
+        Group a list of orders by their departure restaurants.
+
+        Parameters
+        ----------
+        orders : List[Order]
+            The list of orders to group.
+
+        Returns
+        -------
+        Dict[Restaurant, List[Order]]
+            A dictionary of lists of orders, with the key being the common departure restaurant of the orders.
+
+        """
+        restaurants = dict()
+        for order in orders:
+            if order.departure_restaurant in restaurants:
+                restaurants[order.departure_restaurant].append(order)
+            else:
+                restaurants[order.departure_restaurant] = [order]
+        return restaurants
 
 
 class Sequence:
@@ -498,12 +548,17 @@ class Sequence:
         # Set earliest_departure_time
         if len(self.order_list) > 0:
             # earliest_departure_time is the latest ready time of the orders
-            self.earliest_departure_time = max(order.earliest_departure_time for order in self.order_list)
+            self.earliest_departure_time = max(
+                order.earliest_departure_time for order in self.order_list
+            )
         else:
             # no orders, check location for earliest_departure_time
             if type(self.departure_location) == Restaurant:
                 # earliest_departure_time is the earliest ready time of the orders
-                self.earliest_departure_time = min(order.earliest_departure_time for order in self.departure_location.orders)
+                self.earliest_departure_time = min(
+                    order.earliest_departure_time
+                    for order in self.departure_location.orders
+                )
             else:
                 # earliest_departure_time is the on time of the courier
                 self.earliest_departure_time = self.departure_location.on_time
@@ -511,13 +566,28 @@ class Sequence:
         # Set travel_time and latest_departure_time
         if len(self.order_list) > 0:
             # Iterate through the orders, calculating travel_time and latest_departure_time
-            self.travel_time = self.departure_location.get_time_to(self.order_list[0]) + (Data.PICKUP_SERVICE_TIME + Data.DROPOFF_SERVICE_TIME) / 2
-            self.latest_departure_time = self.order_list[0].placement_time + Data.MAX_CLICK_TO_DOOR - self.travel_time
+            self.travel_time = (
+                self.departure_location.get_time_to(self.order_list[0])
+                + (Data.PICKUP_SERVICE_TIME + Data.DROPOFF_SERVICE_TIME) / 2
+            )
+            self.latest_departure_time = (
+                self.order_list[0].placement_time
+                + Data.MAX_CLICK_TO_DOOR
+                - self.travel_time
+            )
 
             for i in range(len(self.order_list) - 1):
                 # Iterate through all orders except the last one, adding the journey to the total
-                self.travel_time += self.order_list[i].get_time_to(self.order_list[i+1]) + Data.DROPOFF_SERVICE_TIME
-                self.latest_departure_time = min(self.latest_departure_time, self.order_list[i+1].placement_time + Data.MAX_CLICK_TO_DOOR - self.travel_time)
+                self.travel_time += (
+                    self.order_list[i].get_time_to(self.order_list[i + 1])
+                    + Data.DROPOFF_SERVICE_TIME
+                )
+                self.latest_departure_time = min(
+                    self.latest_departure_time,
+                    self.order_list[i + 1].placement_time
+                    + Data.MAX_CLICK_TO_DOOR
+                    - self.travel_time,
+                )
 
         else:
             # No orders in sequence. travel_time is zero
@@ -525,7 +595,10 @@ class Sequence:
 
             if type(self.departure_location) == Restaurant:
                 # latest_departure_time is the latest latest_departure_time of any order at the restaurant
-                self.latest_departure_time = max(order.latest_departure_time for order in self.departure_location.orders)
+                self.latest_departure_time = max(
+                    order.latest_departure_time
+                    for order in self.departure_location.orders
+                )
 
             else:
                 # latest_departure_time is the courier's off time
@@ -538,7 +611,9 @@ class Sequence:
             if dominate_key not in Sequence.sequences_by_orders_and_last_order:
                 Sequence.sequences_by_orders_and_last_order[dominate_key] = [self]
             else:
-                dominate_list = Sequence.sequences_by_orders_and_last_order[dominate_key]
+                dominate_list = Sequence.sequences_by_orders_and_last_order[
+                    dominate_key
+                ]
                 dominate_list.append(self)
                 dominated_sequences = Sequence.dominate(dominate_list)
                 for sequence in dominated_sequences:
@@ -592,15 +667,23 @@ class Sequence:
         dominated_sequences = set()
         sequence_one = sequences[-1]
         for sequence_two in sequences[:-1]:
-            if sequence_one.travel_time <= sequence_two.travel_time and sequence_one.latest_departure_time >= sequence_two.latest_departure_time:
+            if (
+                sequence_one.travel_time <= sequence_two.travel_time
+                and sequence_one.latest_departure_time
+                >= sequence_two.latest_departure_time
+            ):
                 dominated_sequences.add(sequence_two)
-            elif sequence_two.travel_time <= sequence_one.travel_time and sequence_two.latest_departure_time >= sequence_one.latest_departure_time:
+            elif (
+                sequence_two.travel_time <= sequence_one.travel_time
+                and sequence_two.latest_departure_time
+                >= sequence_one.latest_departure_time
+            ):
                 dominated_sequences.add(sequence_one)
         return dominated_sequences
 
     def __str__(self) -> str:
         """Return str(self)."""
-        return f'({self.departure_location}, {self.order_list})'
+        return f"({self.departure_location}, {self.order_list})"
 
     def __repr__(self) -> str:
         """Return repr(self)."""
@@ -664,25 +747,39 @@ class Arc:
 
         # earliest_departure_time
         if type(self.departure_location) == Restaurant:
-            self.earliest_departure_time = max(self.group.get_earliest_arrival_at(self.departure_location), self.sequence.earliest_departure_time)
+            self.earliest_departure_time = max(
+                self.group.get_earliest_arrival_at(self.departure_location),
+                self.sequence.earliest_departure_time,
+            )
         else:  # type(self.departure_location) == Courier
-            assert type(self.departure_location) == Courier, 'incorrect location type'
+            assert type(self.departure_location) == Courier, "incorrect location type"
             self.earliest_departure_time = self.departure_location.on_time
 
         # travel_time
         if len(self.sequence.order_list) > 0:
             if type(self.arrival_location) == Restaurant:  # Main arc
                 last_order = self.sequence.order_list[-1]
-                self.travel_time = self.sequence.travel_time + last_order.get_time_to(self.arrival_location) + (Data.PICKUP_SERVICE_TIME + Data.DROPOFF_SERVICE_TIME) / 2
+                self.travel_time = (
+                    self.sequence.travel_time
+                    + last_order.get_time_to(self.arrival_location)
+                    + (Data.PICKUP_SERVICE_TIME + Data.DROPOFF_SERVICE_TIME) / 2
+                )
             else:  # Departure arc
-                assert type(self.arrival_location) == Group, 'incorrect location type'
+                assert type(self.arrival_location) == Group, "incorrect location type"
                 self.travel_time = self.sequence.travel_time
         else:
             if type(self.departure_location) == Courier:  # Entry arc
-                assert type(self.arrival_location) == Restaurant, 'incorrect location type'
-                self.travel_time = self.departure_location.get_time_to(self.arrival_location) + Data.PICKUP_SERVICE_TIME / 2
+                assert (
+                    type(self.arrival_location) == Restaurant
+                ), "incorrect location type"
+                self.travel_time = (
+                    self.departure_location.get_time_to(self.arrival_location)
+                    + Data.PICKUP_SERVICE_TIME / 2
+                )
             else:  # Waiting arc
-                assert type(self.departure_location) == Restaurant, 'incorrect location type'
+                assert (
+                    type(self.departure_location) == Restaurant
+                ), "incorrect location type"
                 self.travel_time = 1
 
         # earliest_arrival_time
@@ -690,51 +787,95 @@ class Arc:
 
         # latest_arrival_time
         if type(self.arrival_location) == Restaurant:
-            deliverable_orders = set(order for order in self.arrival_location.orders if order.earliest_departure_time <= self.group.off_time if order not in self.sequence.order_list)
+            deliverable_orders = set(
+                order
+                for order in self.arrival_location.orders
+                if order.earliest_departure_time <= self.group.off_time
+                if order not in self.sequence.order_list
+            )
             assert len(deliverable_orders) > 0
-            self.latest_arrival_time = min(self.group.off_time, max(order.latest_departure_time for order in deliverable_orders))
+            self.latest_arrival_time = min(
+                self.group.off_time,
+                max(order.latest_departure_time for order in deliverable_orders),
+            )
         else:
             assert type(self.arrival_location) == Group
-            self.latest_arrival_time = min(self.group.off_time, self.sequence.latest_departure_time) + self.travel_time
+            self.latest_arrival_time = (
+                min(self.group.off_time, self.sequence.latest_departure_time)
+                + self.travel_time
+            )
 
         # latest_departure_time
-        self.latest_departure_time = min(self.group.off_time, self.sequence.latest_departure_time, self.latest_arrival_time - self.travel_time)
+        self.latest_departure_time = min(
+            self.group.off_time,
+            self.sequence.latest_departure_time,
+            self.latest_arrival_time - self.travel_time,
+        )
         # update latest_arrival_time
-        self.latest_arrival_time = min(self.latest_arrival_time, self.latest_departure_time + self.travel_time)
+        self.latest_arrival_time = min(
+            self.latest_arrival_time, self.latest_departure_time + self.travel_time
+        )
 
         # Dominate
         if self.earliest_departure_time <= self.latest_departure_time:
             Arc.arcs.add(self)
             key = (self.group, self.arrival_location)
-            dominate_key = (self.group, frozenset(self.sequence.order_list), self.arrival_location)
+            dominate_key = (
+                self.group,
+                frozenset(self.sequence.order_list),
+                self.arrival_location,
+            )
             if key not in Arc.arcs_by_group_and_arrival_location:
                 Arc.arcs_by_group_and_arrival_location[key] = []
             if dominate_key not in Arc.arcs_by_group_and_order_set_and_arrival_location:
                 Arc.arcs_by_group_and_order_set_and_arrival_location[dominate_key] = []
-            if (self.group, self.departure_location) not in Arc.arcs_by_group_and_departure_location:
-                Arc.arcs_by_group_and_departure_location[(self.group, self.departure_location)] = list()
+            if (
+                self.group,
+                self.departure_location,
+            ) not in Arc.arcs_by_group_and_departure_location:
+                Arc.arcs_by_group_and_departure_location[
+                    (self.group, self.departure_location)
+                ] = list()
             Arc.arcs_by_group_and_arrival_location[key].append(self)
-            Arc.arcs_by_group_and_order_set_and_arrival_location[dominate_key].append(self)
-            Arc.arcs_by_group_and_departure_location[self.group, self.departure_location].append(self)
+            Arc.arcs_by_group_and_order_set_and_arrival_location[dominate_key].append(
+                self
+            )
+            Arc.arcs_by_group_and_departure_location[
+                self.group, self.departure_location
+            ].append(self)
             if len(self.sequence.order_list) >= 2:
-                dominate_list = Arc.arcs_by_group_and_order_set_and_arrival_location[dominate_key]
+                dominate_list = Arc.arcs_by_group_and_order_set_and_arrival_location[
+                    dominate_key
+                ]
                 if len(dominate_list) >= 2:
                     dominated_arcs = Arc.dominate(dominate_list)
                     for arc in dominated_arcs:
                         dominate_list.remove(arc)
                         Arc.arcs.remove(arc)
-                        Arc.arcs_by_group_and_arrival_location[arc.group, arc.arrival_location].remove(arc)
-                        Arc.arcs_by_group_and_departure_location[arc.group, arc.departure_location].remove(arc)
+                        Arc.arcs_by_group_and_arrival_location[
+                            arc.group, arc.arrival_location
+                        ].remove(arc)
+                        Arc.arcs_by_group_and_departure_location[
+                            arc.group, arc.departure_location
+                        ].remove(arc)
         if self in Arc.arcs:
-            Arc.arc_by_components[(self.group, self.sequence, self.arrival_location)] = self
+            Arc.arc_by_components[
+                (self.group, self.sequence, self.arrival_location)
+            ] = self
 
     def dominate(arcs: List[Arc]) -> Set[Arc]:
         arc1 = arcs[-1]
         dominated_arcs = set()
         for arc2 in arcs[:-1]:
-            if arc1.latest_departure_time >= arc2.latest_departure_time and arc1.travel_time <= arc2.travel_time:
+            if (
+                arc1.latest_departure_time >= arc2.latest_departure_time
+                and arc1.travel_time <= arc2.travel_time
+            ):
                 dominated_arcs.add(arc2)
-            elif arc2.latest_departure_time >= arc1.latest_departure_time and arc2.travel_time <= arc1.travel_time:
+            elif (
+                arc2.latest_departure_time >= arc1.latest_departure_time
+                and arc2.travel_time <= arc1.travel_time
+            ):
                 dominated_arcs.add(arc1)
         return dominated_arcs
 
@@ -759,7 +900,19 @@ class Arc:
         departure_location = self.departure_location
         latest_departure_time = self.latest_departure_time
         group = self.group
-        return set(arc for arc in Arc.arcs_by_group_and_arrival_location[(group, departure_location)] if arc.earliest_arrival_time <= latest_departure_time if set(arc.sequence.order_list).intersection(set(self.sequence.order_list)) == set() if (arc.departure_location != arc.arrival_location or arc.sequence.order_list != []))
+        return set(
+            arc
+            for arc in Arc.arcs_by_group_and_arrival_location[
+                (group, departure_location)
+            ]
+            if arc.earliest_arrival_time <= latest_departure_time
+            if set(arc.sequence.order_list).intersection(set(self.sequence.order_list))
+            == set()
+            if (
+                arc.departure_location != arc.arrival_location
+                or arc.sequence.order_list != []
+            )
+        )
 
     def get_succ(self) -> Set[Arc]:
         if type(self.arrival_location) == Group:
@@ -795,8 +948,10 @@ class Arc:
         for arc in arcs:
             predecessors.union(arc.get_pred())
         return predecessors
-    
-    def get_arc_from_components(group: Group, sequence: Sequence, arrival_location: Location) -> Arc:
+
+    def get_arc_from_components(
+        group: Group, sequence: Sequence, arrival_location: Location
+    ) -> Arc:
         return Arc.arc_by_components[(group, sequence, arrival_location)]
 
     def __str__(self) -> str:
@@ -806,6 +961,42 @@ class Arc:
     def __repr__(self) -> str:
         """Return repr(self)."""
         return self.__str__()
+
+    def get_arcs_for_orders(orders: List[Order], group: Group) -> List[Arc]:
+        """
+        Get all arcs that deliver orders from the given list, and are serviced by the given group.
+
+        Parameters
+        ----------
+        orders : List[Order]
+            The list of orders to retrieve arcs for.
+        group : Group
+            The courier group to retrieve arcs for.
+
+        Returns
+        -------
+        List[Arc]
+            The list of arcs containing the given orders, serviced by the given group.
+
+        """
+        order_set = set(orders)
+
+        arrival_locations = list()
+        for restaurant in Order.group_orders_by_restaurant(orders):
+            arrival_locations.append(restaurant)
+        arrival_locations.append(group)
+
+        arcs = list()
+        for key in Arc.arcs_by_group_and_order_set_and_arrival_location.keys():
+            if (
+                key[0] == group
+                and key[1].issubset(order_set)
+                and key[2] in arrival_locations
+            ):
+                for arc in Arc.arcs_by_group_and_order_set_and_arrival_location[key]:
+                    arcs.append(arc)
+
+        return arcs
 
 
 class Node:
@@ -872,15 +1063,28 @@ class Node:
         # No node at arrival time
         # Check if active order at arrival time
         # If active order, round down. Otherwise, round up.
-        active_orders = list(order for order in restaurant.orders if order.earliest_departure_time <= time if order.latest_departure_time >= time)
+        active_orders = list(
+            order
+            for order in restaurant.orders
+            if order.earliest_departure_time <= time
+            if order.latest_departure_time >= time
+        )
         if len(active_orders) > 0:
-            arrival_time = max(node.time for node in Node.nodes_by_group_and_location[(group, restaurant)] if node.time < time)
+            arrival_time = max(
+                node.time
+                for node in Node.nodes_by_group_and_location[(group, restaurant)]
+                if node.time < time
+            )
         else:
-            arrival_time = min(node.time for node in Node.nodes_by_group_and_location[(group, restaurant)] if node.time > time)
+            arrival_time = min(
+                node.time
+                for node in Node.nodes_by_group_and_location[(group, restaurant)]
+                if node.time > time
+            )
 
         # Return the calculated node
         return Node.node_by_components[(group, restaurant, arrival_time)]
-    
+
     def __str__(self):
         """Return str(self)."""
         return f"({self.group}, {self.location}, {self.time})"
@@ -979,19 +1183,34 @@ class Fragment:
 
         # Find the arrival node for the arc
         if type(self.arrival_location) == Group:
-            self.arrival_node = Node.node_by_components[(self.group, self.arrival_location, self.group.off_time)]
+            self.arrival_node = Node.node_by_components[
+                (self.group, self.arrival_location, self.group.off_time)
+            ]
         elif type(self.arrival_location) == Restaurant:
             # If waiting arc, move to the next time
             # If not waiting arc, use calculated arrival node
-            if self.order_list == [] and self.departure_location == self.arrival_location:
+            if (
+                self.order_list == []
+                and self.departure_location == self.arrival_location
+            ):
                 # Waiting path fragment, increment time
-                arrival_time = min(node.time
-                                   for node in Node.nodes_by_group_and_location[(self.group, self.arrival_location)]
-                                   if node.time > self.departure_time)
-                self.arrival_node = Node.node_by_components[(self.group, self.arrival_location, arrival_time)]
+                arrival_time = min(
+                    node.time
+                    for node in Node.nodes_by_group_and_location[
+                        (self.group, self.arrival_location)
+                    ]
+                    if node.time > self.departure_time
+                )
+                self.arrival_node = Node.node_by_components[
+                    (self.group, self.arrival_location, arrival_time)
+                ]
             else:
                 # Use calculated arrival_node
-                self.arrival_node = Node.get_arrival_node(self.group, self.arrival_location, self.departure_time + self.arc.travel_time)
+                self.arrival_node = Node.get_arrival_node(
+                    self.group,
+                    self.arrival_location,
+                    self.departure_time + self.arc.travel_time,
+                )
         else:
             assert False
 
@@ -1001,7 +1220,12 @@ class Fragment:
         # Try dominating against the last fragment added, rather than all arcs so far added.
         if len(Fragment.fragments) > 0:
             last_fragment = Fragment.fragments[-1]
-            if self.arc == last_fragment.arc and self.arrival_time == last_fragment.arrival_time and self.departure_time > last_fragment.departure_time and self.departure_location == last_fragment.departure_location:
+            if (
+                self.arc == last_fragment.arc
+                and self.arrival_time == last_fragment.arrival_time
+                and self.departure_time > last_fragment.departure_time
+                and self.departure_location == last_fragment.departure_location
+            ):
                 Fragment.fragments[-1] = self
             else:
                 Fragment.fragments.append(self)
@@ -1029,9 +1253,15 @@ class Fragment:
         fragment_one = fragments[-1]
         dominated_fragments = set()
         for fragment_two in fragments[:-1]:
-            if fragment_one.departure_node.time >= fragment_two.departure_node.time and fragment_one.arrival_node.time <= fragment_two.arrival_node.time:
+            if (
+                fragment_one.departure_node.time >= fragment_two.departure_node.time
+                and fragment_one.arrival_node.time <= fragment_two.arrival_node.time
+            ):
                 dominated_fragments.add(fragment_two)
-            elif fragment_two.departure_node.time >= fragment_one.departure_node.time and fragment_two.arrival_node.time <= fragment_one.arrival_node.time:
+            elif (
+                fragment_two.departure_node.time >= fragment_one.departure_node.time
+                and fragment_two.arrival_node.time <= fragment_one.arrival_node.time
+            ):
                 dominated_fragments.add(fragment_one)
         return dominated_fragments
 
@@ -1064,7 +1294,9 @@ class Fragment:
             Fragment.fragments_by_order[order] = list()
 
         for fragment in Fragment.fragments:
-            Fragment.fragments_by_departure_node[fragment.departure_node].append(fragment)
+            Fragment.fragments_by_departure_node[fragment.departure_node].append(
+                fragment
+            )
             Fragment.fragments_by_arrival_node[fragment.arrival_node].append(fragment)
 
             Fragment.fragments_by_sequence[fragment.sequence].append(fragment)
@@ -1081,8 +1313,10 @@ class Fragment:
             if type(fragment.departure_location) == Courier:
                 courier: Courier = fragment.departure_location
                 Fragment.departure_fragments_by_courier[courier].append(fragment)
-    
-    def get_fragment_by_arc_and_departure_node(arc: Arc, departure_node: Node) -> Fragment:
+
+    def get_fragment_by_arc_and_departure_node(
+        arc: Arc, departure_node: Node
+    ) -> Fragment:
         """
         Return the unique fragment defined by the given arc and departure node.
 
@@ -1110,3 +1344,128 @@ class Fragment:
     def __repr__(self):
         """Return repr(self)."""
         return self.__str__()
+
+    def get_timed_fragments_from_untimed_fragment_network(
+        paths: List[UntimedFragmentPath],
+    ) -> List[Fragment]:
+        """
+        Create a list of timed fragments from a list of untimed fragment paths.
+
+        This function takes as input a list of untimed fragment paths representing a complete untimed fragment network, and converts each path to one consisting of timed fragments. It then collects all the timed fragments in each path and returns them as a completed list.
+
+        Parameters
+        ----------
+        paths : List[UntimedFragmentPath]
+            A list of untimed fragment paths.
+
+        Returns
+        -------
+        List[Fragment]
+            A list of timed fragments built on the untimed fragment paths.
+
+        """
+        timed_path_fragments = list()
+        for path in paths:
+            timed_fragment_path = path.convert_to_timed_fragment_path()
+            for timed_fragment in timed_fragment_path:
+                timed_path_fragments.append(timed_fragment)
+        return timed_path_fragments
+
+    def get_waiting_timed_fragment_from_node(node: Node) -> Fragment:
+        """
+        Find the (unique) waiting timed fragment from a given node.
+
+        Parameters
+        ----------
+        node : Node
+            The node to search for a waiting timed fragment from.
+
+        Returns
+        -------
+        timed_fragment : Fragment
+            The waiting timed fragment departing from the given node.
+
+        """
+        for timed_fragment in Fragment.fragments_by_departure_node(node):
+            if timed_fragment.order_list == list() and timed_fragment.arrival_location == timed_fragment.departure_location:
+                return timed_fragment
+
+
+class UntimedFragmentPath:
+    """
+    A class representing a string of untimed fragments joined together to make a complete path through the network.
+
+    Attributes
+    ----------
+    path : List[Arc]
+        The untimed fragments that make up the path through the network.
+    """
+
+    def __init__(self, path: List[Arc]):
+        self.path = path
+
+    def get_untimed_fragments(self) -> List[Arc]:
+        """
+        Get the untimed fragments that make up the path as a list.
+
+        Returns
+        -------
+        List[Arc]
+            The list of untimed fragments that make up the path.
+
+        Methods
+        -------
+        convert_to_timed_fragment_path(self) -> TimedFragmentPath
+            Convert the path of untimed fragments into a path of timed fragments.
+
+        """
+        return self.path
+
+    def convert_to_timed_fragment_path(self) -> TimedFragmentPath:
+        """
+        Convert the path from being made up of untimed fragments to one being made up of timed fragments.
+
+        Returns
+        -------
+        TimedFragmentPath
+            The timed fragment path equivalent to the untimed fragment path.
+
+        """
+        timed_fragment_path = list()
+        current_time = 0
+        for untimed_fragment in self.path:
+            # Iterate through all the untimed fragments
+            current_time = min(current_time, untimed_fragment.earliest_departure_time)
+            best_timed_fragment = None
+            for timed_fragment in Fragment.fragments_by_arc[untimed_fragment]:
+                # Find the earliest timed fragment
+                if timed_fragment.departure_time >= current_time and (best_timed_fragment is None or timed_fragment.departure_time < best_timed_fragment.departure_time):
+                    best_timed_fragment = timed_fragment
+            if best_timed_fragment.departure_time != current_time:
+                # We need to add waiting arcs
+                group = best_timed_fragment.group
+                location = best_timed_fragment.departure_location
+                while current_time < best_timed_fragment.departure_time:
+                    node = Node.node_by_components[(group, location, current_time)]
+                    waiting_timed_fragment = Fragment.get_waiting_timed_fragment_from_node(node)
+                    timed_fragment_path.append(waiting_timed_fragment)
+                    current_time = waiting_timed_fragment.arrival_time
+            # Add fragment to the list
+            timed_fragment_path.append(best_timed_fragment)
+            # Update time
+            current_time = best_timed_fragment.arrival_time
+        return TimedFragmentPath(timed_fragment_path)
+
+
+class TimedFragmentPath:
+    """
+    A class representing a string of timed fragments joined together to make a complete path through the network.
+
+    Attributes
+    ----------
+    path : List[Fragment]
+        The list of timed fragments that make up the path.
+    """
+
+    def __init__(self, path: List[Fragment]):
+        self.path = path
