@@ -753,6 +753,11 @@ def Callback(model, where):
 
         for fragment in fragments:
 
+            if mdrp.cbGetSolution(fragments[fragment]) < 0.1:
+                continue
+
+            activated_fragments.append(fragment)
+
             # We don't care about any fragments that aren't moving between locations, that is, waiting fragments
             if (
                 len(fragment.order_list) == 0
@@ -761,10 +766,8 @@ def Callback(model, where):
                 continue
 
             # Add activated arcs to the list
-            if mdrp.cbGetSolution(fragments[fragment]) > 0.9:
-                group = fragment.group
-                activated_arcs_by_group[group].append(fragment.arc)
-                activated_fragments.append(fragment)
+            group = fragment.group
+            activated_arcs_by_group[group].append(fragment.arc)
 
         # start as true, if group not feasible, set variable to false
         all_groups_feasible = True
@@ -788,40 +791,17 @@ def Callback(model, where):
             From these definitions, we can see that an arc pred is a predecessor of an arc succ if and only if succ is a successor of pred.
             """
             # Dictionaries for storing predecessors and arcs.
-            pred = {arc: set() for arc in group_arcs}  # {succ: {pred1, ..., predn}}
-            succ = {arc: set() for arc in group_arcs}  # {pred: {succ1, ..., succn}}
+            successors_of_arc = {arc: set() for arc in group_arcs if arc.arrival_location != arc.group}
 
             for arc1, arc2 in itertools.combinations(group_arcs, 2):
-
-                # Check for the given conditions, and ensure that the courier isn't heading home and departing again.
-                if (
-                    arc1.arrival_location == arc2.departure_location
-                    and arc1.earliest_departure_time + arc1.travel_time
-                    <= arc2.latest_departure_time
-                    and type(arc1.arrival_location) != Group
-                    and set(arc1.order_list).intersection(set(arc2.order_list)) == set()
-                ):
-                    pred[arc2].add(arc1)
-                    succ[arc1].add(arc2)
-                if (
-                    arc2.arrival_location == arc1.departure_location
-                    and arc2.earliest_departure_time + arc2.travel_time
-                    <= arc1.latest_departure_time
-                    and type(arc2.arrival_location) != Group
-                    and set(arc1.order_list).intersection(set(arc2.order_list)) == set()
-                ):
-                    pred[arc1].add(arc2)
-                    succ[arc2].add(arc1)
-
-            for arc in group_arcs:
-
-                # We only care about arcs with predecessors or successors.
-                # If an arc has no predecessor or successor, then it can be ignored.
-                # TODO: Confirm these arcs are only entry or exit arcs
-                if len(pred[arc]) == 0:
-                    del pred[arc]
-                if len(succ[arc]) == 0:
-                    del succ[arc]
+                # Check if arc2 is a successor of arc1
+                if arc1.arrival_location != arc1.group and arc1.arrival_location == arc2.departure_location and arc1.earliest_departure_time + arc1.travel_time <= arc2.latest_departure_time:
+                    # Add arc2 as a successor of arc1
+                    successors_of_arc[arc1].add(arc2)
+                # Check if arc1 is a successor of arc2
+                if arc2.arrival_location != arc2.group and arc2.arrival_location == arc1.departure_location and arc2.earliest_departure_time + arc2.travel_time <= arc1.latest_departure_time:
+                    # Add arc1 as a successor of arc2
+                    successors_of_arc[arc2].add(arc1)
 
             """
             The rest of this function deals with the creation and solving of the sub-model. The mathematics of this sub-model are explained in detail in sections 3.1 and 3.2 of the write-up.
@@ -835,11 +815,7 @@ def Callback(model, where):
             ipe = Model("Illegal Path Elimination")
             ipe.setParam("OutputFlag", 0)
             courier_payments = {courier: ipe.addVar() for courier in group.couriers}
-            successors = {
-                (arc1, arc2): ipe.addVar(vtype=GRB.BINARY)
-                for arc2 in pred
-                for arc1 in pred[arc2]
-            }
+            successors = {(arc1, arc2): ipe.addVar(vtype=GRB.BINARY) for arc1 in successors_of_arc for arc2 in successors_of_arc[arc1]}
             timings = {arc: ipe.addVar() for arc in group_arcs}
             assignments = {
                 (courier, arc): ipe.addVar(vtype=GRB.BINARY)
@@ -882,12 +858,7 @@ def Callback(model, where):
                 for arc in group_arcs
             }
             # All non-exit arcs must have a successor (eq 12)
-            have_succ = {
-                arc1: ipe.addConstr(
-                    quicksum(successors[arc1, arc2] for arc2 in succ[arc1]) == 1
-                )
-                for arc1 in succ
-            }
+            have_succ = {arc1: ipe.addConstr(quicksum(successors[arc1, arc2] for arc2 in successors_of_arc[arc1]) == 1) for arc1 in group_arcs if arc1.arrival_location != arc1.group}
             # All successors must start late enough for the previous to finish (eq 15)
             succ_timings = {
                 (arc1, arc2): ipe.addConstr(
@@ -1068,13 +1039,21 @@ def Callback(model, where):
         and mdrp._best_solution_value + 0.0001 < mdrp.cbGet(GRB.Callback.MIPNODE_OBJBST)
     ):
         # Give Gurobi values for all fragments according to our solution
-        for fragment in mdrp._best_fragments:
-            mdrp.cbSetSolution(fragments[fragment], 1)
+        activated_fragment_variables = list()
+        non_activated_fragment_variables = list()
+        for fragment in fragments:
+            if fragment in mdrp._best_fragments:
+                activated_fragment_variables.append(fragments[fragment])
+            else:
+                non_activated_fragment_variables.append(fragments[fragment])
+        mdrp.cbSetSolution(activated_fragment_variables, list(1 for _ in range(len(activated_fragment_variables))))
+        mdrp.cbSetSolution(non_activated_fragment_variables, list(0 for _ in range(len(non_activated_fragment_variables))))
         objVal = mdrp.cbUseSolution()
         if log_find_and_suggest_solutions:
-            print(
-                f"Suggested value of {mdrp._best_solution_value}, Gurobi found {objVal}"
-            )
+            print(f'Suggested value of {mdrp._best_solution_value}, Gurobi found {objVal}')
+            print('Activated fragments are:')
+            for fragment in mdrp._best_fragments:
+                print(fragment)
             print()
 
 
