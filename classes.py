@@ -70,7 +70,7 @@ class Location:
         ----------
         x : int
             The x grid coordinate of the location.
-        y : TYintPE
+        y : int
             The y grid coordinate of the location.
 
         Returns
@@ -1344,3 +1344,128 @@ class Fragment:
     def __repr__(self):
         """Return repr(self)."""
         return self.__str__()
+
+    def get_timed_fragments_from_untimed_fragment_network(
+        paths: List[UntimedFragmentPath],
+    ) -> List[Fragment]:
+        """
+        Create a list of timed fragments from a list of untimed fragment paths.
+
+        This function takes as input a list of untimed fragment paths representing a complete untimed fragment network, and converts each path to one consisting of timed fragments. It then collects all the timed fragments in each path and returns them as a completed list.
+
+        Parameters
+        ----------
+        paths : List[UntimedFragmentPath]
+            A list of untimed fragment paths.
+
+        Returns
+        -------
+        List[Fragment]
+            A list of timed fragments built on the untimed fragment paths.
+
+        """
+        timed_path_fragments = list()
+        for path in paths:
+            timed_fragment_path = path.convert_to_timed_fragment_path()
+            for timed_fragment in timed_fragment_path:
+                timed_path_fragments.append(timed_fragment)
+        return timed_path_fragments
+
+    def get_waiting_timed_fragment_from_node(node: Node) -> Fragment:
+        """
+        Find the (unique) waiting timed fragment from a given node.
+
+        Parameters
+        ----------
+        node : Node
+            The node to search for a waiting timed fragment from.
+
+        Returns
+        -------
+        timed_fragment : Fragment
+            The waiting timed fragment departing from the given node.
+
+        """
+        for timed_fragment in Fragment.fragments_by_departure_node(node):
+            if timed_fragment.order_list == list() and timed_fragment.arrival_location == timed_fragment.departure_location:
+                return timed_fragment
+
+
+class UntimedFragmentPath:
+    """
+    A class representing a string of untimed fragments joined together to make a complete path through the network.
+
+    Attributes
+    ----------
+    path : List[Arc]
+        The untimed fragments that make up the path through the network.
+    """
+
+    def __init__(self, path: List[Arc]):
+        self.path = path
+
+    def get_untimed_fragments(self) -> List[Arc]:
+        """
+        Get the untimed fragments that make up the path as a list.
+
+        Returns
+        -------
+        List[Arc]
+            The list of untimed fragments that make up the path.
+
+        Methods
+        -------
+        convert_to_timed_fragment_path(self) -> TimedFragmentPath
+            Convert the path of untimed fragments into a path of timed fragments.
+
+        """
+        return self.path
+
+    def convert_to_timed_fragment_path(self) -> TimedFragmentPath:
+        """
+        Convert the path from being made up of untimed fragments to one being made up of timed fragments.
+
+        Returns
+        -------
+        TimedFragmentPath
+            The timed fragment path equivalent to the untimed fragment path.
+
+        """
+        timed_fragment_path = list()
+        current_time = 0
+        for untimed_fragment in self.path:
+            # Iterate through all the untimed fragments
+            current_time = min(current_time, untimed_fragment.earliest_departure_time)
+            best_timed_fragment = None
+            for timed_fragment in Fragment.fragments_by_arc[untimed_fragment]:
+                # Find the earliest timed fragment
+                if timed_fragment.departure_time >= current_time and (best_timed_fragment is None or timed_fragment.departure_time < best_timed_fragment.departure_time):
+                    best_timed_fragment = timed_fragment
+            if best_timed_fragment.departure_time != current_time:
+                # We need to add waiting arcs
+                group = best_timed_fragment.group
+                location = best_timed_fragment.departure_location
+                while current_time < best_timed_fragment.departure_time:
+                    node = Node.node_by_components[(group, location, current_time)]
+                    waiting_timed_fragment = Fragment.get_waiting_timed_fragment_from_node(node)
+                    timed_fragment_path.append(waiting_timed_fragment)
+                    current_time = waiting_timed_fragment.arrival_time
+            # Add fragment to the list
+            timed_fragment_path.append(best_timed_fragment)
+            # Update time
+            current_time = best_timed_fragment.arrival_time
+        return TimedFragmentPath(timed_fragment_path)
+
+
+class TimedFragmentPath:
+    """
+    A class representing a string of timed fragments joined together to make a complete path through the network.
+
+    Attributes
+    ----------
+    path : List[Fragment]
+        The list of timed fragments that make up the path.
+    """
+
+    def __init__(self, path: List[Fragment]):
+        self.path = path
