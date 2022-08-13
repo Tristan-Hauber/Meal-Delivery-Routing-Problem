@@ -225,6 +225,7 @@ from classes import (
     Fragment,
 )
 from solution_reader import SolutionReader, SolutionWriter
+from untimed_fragments_mdrp import UntimedFragmentsMDRP
 
 # Epoch time from program start
 program_start_time = time.time()
@@ -245,60 +246,13 @@ reduce_couriers = False
 courier_range_start = 1  # TODO: Implement this functionality
 courier_range_end = 61
 couriers_to_avoid = list(
-    (
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-        9,
-        10,
-        12,
-        13,
-        14,
-        16,
-        17,
-        19,
-        20,
-        21,
-        22,
-        23,
-        24,
-        25,
-        26,
-        27,
-        28,
-        29,
-        30,
-        31,
-        32,
-        34,
-        35,
-        36,
-        37,
-        38,
-        40,
-        41,
-        42,
-        43,
-        44,
-        46,
-        47,
-        48,
-        50,
-        52,
-        53,
-        54,
-        55,
-        56,
-        58,
-        59,
-        60,
-        61,
-    )
+    (1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+     12, 13, 14, 16, 17, 19, 20,
+     21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+     31, 32, 34, 35, 36, 37, 38, 40,
+     41, 42, 43, 44, 46, 47, 48, 50,
+     52, 53, 54, 55, 56, 58, 59, 60,
+     61)
 )
 # Necessary couriers: 11, 15, 18, 33, 39, 45, 49, 51, 57
 
@@ -744,8 +698,9 @@ def Callback(model, where):
                 f"Checking new incumbent solution with value {mdrp.cbGet(GRB.Callback.MIPSOL_OBJ)}"
             )
         # Get all activated fragments
-        activated_arcs_by_group = {group: [] for group in Group.groups}
-        activated_fragments = []
+        group_arcs = {group: [] for group in Group.groups}
+        group_orders = {group: [] for group in Group.groups}
+        group_fragments = {group: [] for group in Group.groups}
         group_payments = {
             group: group.get_total_on_time() * Data.MIN_PAY_PER_HOUR / 60
             for group in Group.groups
@@ -756,7 +711,8 @@ def Callback(model, where):
             if mdrp.cbGetSolution(fragments[fragment]) < 0.1:
                 continue
 
-            activated_fragments.append(fragment)
+            # Add all activated fragments to the list, even waiting fragments
+            group_fragments[fragment.group].append(fragment)
 
             # We don't care about any fragments that aren't moving between locations, that is, waiting fragments
             if (
@@ -767,7 +723,9 @@ def Callback(model, where):
 
             # Add activated arcs to the list
             group = fragment.group
-            activated_arcs_by_group[group].append(fragment.arc)
+            group_arcs[group].append(fragment.arc)
+            for order in fragment.orders:
+                group_orders[group].append(order)
 
         # start as true, if group not feasible, set variable to false
         all_groups_feasible = True
@@ -775,10 +733,10 @@ def Callback(model, where):
         # We have identified all activated fragments
         # Now we go through each courier group and build a sub-network
         for group in Group.groups:
-            group_arcs = activated_arcs_by_group[group]
+            arcs = group_arcs[group]
 
             # If no activated arcs, then subnetwork is trivially feasible and optimal
-            if len(group_arcs) == 0:
+            if len(arcs) == 0:
                 continue
 
             """
@@ -791,9 +749,9 @@ def Callback(model, where):
             From these definitions, we can see that an arc pred is a predecessor of an arc succ if and only if succ is a successor of pred.
             """
             # Dictionaries for storing predecessors and arcs.
-            successors_of_arc = {arc: set() for arc in group_arcs if arc.arrival_location != arc.group}
+            successors_of_arc = {arc: set() for arc in arcs if arc.arrival_location != arc.group}
 
-            for arc1, arc2 in itertools.combinations(group_arcs, 2):
+            for arc1, arc2 in itertools.combinations(arcs, 2):
                 # Check if arc2 is a successor of arc1
                 if arc1.arrival_location != arc1.group and arc1.arrival_location == arc2.departure_location and arc1.earliest_departure_time + arc1.travel_time <= arc2.latest_departure_time:
                     # Add arc2 as a successor of arc1
@@ -816,11 +774,11 @@ def Callback(model, where):
             ipe.setParam("OutputFlag", 0)
             courier_payments = {courier: ipe.addVar() for courier in group.couriers}
             successors = {(arc1, arc2): ipe.addVar(vtype=GRB.BINARY) for arc1 in successors_of_arc for arc2 in successors_of_arc[arc1]}
-            timings = {arc: ipe.addVar() for arc in group_arcs}
+            timings = {arc: ipe.addVar() for arc in arcs}
             assignments = {
                 (courier, arc): ipe.addVar(vtype=GRB.BINARY)
                 for courier in group.couriers
-                for arc in group_arcs
+                for arc in arcs
             }
 
             # Minimise cumulative courier payments (eq 8)
@@ -844,7 +802,7 @@ def Callback(model, where):
                         assignments[courier, arc]
                         * len(arc.order_list)
                         * Data.PAY_PER_DELIVERY
-                        for arc in group_arcs
+                        for arc in arcs
                     )
                 )
                 for courier in group.couriers
@@ -855,10 +813,10 @@ def Callback(model, where):
                     quicksum(assignments[courier, arc] for courier in group.couriers)
                     == 1
                 )
-                for arc in group_arcs
+                for arc in arcs
             }
             # All non-exit arcs must have a successor (eq 12)
-            have_succ = {arc1: ipe.addConstr(quicksum(successors[arc1, arc2] for arc2 in successors_of_arc[arc1]) == 1) for arc1 in group_arcs if arc1.arrival_location != arc1.group}
+            have_succ = {arc1: ipe.addConstr(quicksum(successors[arc1, arc2] for arc2 in successors_of_arc[arc1]) == 1) for arc1 in arcs if arc1.arrival_location != arc1.group}
             # All successors must start late enough for the previous to finish (eq 15)
             succ_timings = {
                 (arc1, arc2): ipe.addConstr(
@@ -885,12 +843,12 @@ def Callback(model, where):
             # An arc must be serviced after it is ready (eq 13)
             begin_on_time = {
                 arc: ipe.addConstr(timings[arc] >= arc.earliest_departure_time)
-                for arc in group_arcs
+                for arc in arcs
             }
             # An arc must be serviced before it is too late (eq 14)
             end_on_time = {
                 arc: ipe.addConstr(timings[arc] <= arc.latest_departure_time)
-                for arc in group_arcs
+                for arc in arcs
             }
 
             # After constraint generation, solve submodel
@@ -908,10 +866,10 @@ def Callback(model, where):
                         >= group_payment
                         * (
                             1
-                            - len(group_arcs)
+                            - len(arcs)
                             + quicksum(
                                 fragments[fragment]
-                                for arc in group_arcs
+                                for arc in arcs
                                 for fragment in Fragment.fragments_by_arc[arc]
                             )
                         )
@@ -960,7 +918,7 @@ def Callback(model, where):
                     + quicksum(
                         fragments[fragment]
                         for pred in Arc.get_pred_to_arcs(infeasible_arcs)
-                        if pred not in group_arcs
+                        if pred not in arcs
                         for fragment in Fragment.fragments_by_arc[pred]
                     )
                 )
@@ -997,36 +955,51 @@ def Callback(model, where):
                     if log_constraint_additions:
                         print(f"Added {VI_added} valid inequalities.")
 
-        if all_groups_feasible and suggest_solution_after_optimality_constraints:
-            """
-            If all groups are feasible, then we want to save the solution to
-            suggest later. We already have the fragments to be activated, and
-            we also have the orders that are delivered.
-            """
-            if log_constraint_additions:
-                print("All groups feasible, only optimality constraints added")
-            # Calculate new solution value
-            solution_value = 0
-            for group in Group.groups:
-                solution_value += group_payments[group]
-            for order in orders:
-                if mdrp.cbGetSolution(orders[order]) < 0.1:
-                    solution_value += 10000
-            # Compare to previous solution value
-            if solution_value + 0.0001 < mdrp._best_solution_value:
-                # Save activated fragments and delivered orders to suggest later
-                mdrp._best_fragments = activated_fragments
-                mdrp._best_solution_value = solution_value
-                if log_find_and_suggest_solutions:
-                    print(
-                        f"Saved solution of value {solution_value} to suggest later\n"
-                    )
-            elif log_find_and_suggest_solutions:
-                print("Found solution worse than current best solution\n")
-        elif log_constraint_additions:
-            print(
-                "At least one group infeasible, at least one feasibility constraint added\n"
-            )
+                # Create a new solution for the group
+                submodel = UntimedFragmentsMDRP(group, group.get_arcs(), group_orders[group])
+                submodel.optimize()
+                undelivered_orders = list()
+                for order in submodel.deliveries:
+                    if submodel.deliveries[order].x < 0.1:
+                        undelivered_orders.append(order)
+                # Add constraint on orders in the group
+                if len(undelivered_orders) > 0:
+                    delivered_orders = list(order for order in submodel.deliveries if order not in undelivered_orders)
+                    for order in undelivered_orders:
+                        invalid_order_set = set(delivered_orders)
+                        invalid_order_set.add(order)
+                        invalid_fragment_set = set(fragment for fragment in Fragment.get_fragments_from_orders(invalid_order_set) if fragment.group == group)
+                        mdrp.cbLazy(quicksum(fragments[fragment] * len(set(fragment.order_list).intersection(invalid_order_set)) for fragment in invalid_fragment_set) <= len(invalid_order_set) - 1)
+                # Suggest a solution to Gurobi
+                group_payments[group] = submodel.objVal
+                group_fragments[group] = submodel.convert_to_timed_path_fragments()
+
+        """
+        Suggest our constructed solution to Gurobi.
+
+        If all groups are feasible, then we simply suggest the fragments that were activated at the beginning of the callback. If at least one group was infeasible, then we replace the fragments for that group with our new fragments.
+        """
+        # Calculate new solution value
+        solution_value = 0
+        for group in Group.groups:
+            solution_value += group_payments[group]
+        for order in orders:
+            if mdrp.cbGetSolution(orders[order]) < 0.1:
+                solution_value += 10000
+        # Compare to previous solution value
+        if solution_value + 0.0001 < mdrp._best_solution_value:
+            # Save activated fragments and delivered orders to suggest later
+            mdrp._best_fragments = list()
+            for group in group_fragments:
+                for fragment in group_fragments[group]:
+                    mdrp._best_fragments.append(fragment)
+            mdrp._best_solution_value = solution_value
+            if log_find_and_suggest_solutions:
+                print(
+                    f"Saved solution of value {solution_value} to suggest later\n"
+                )
+        elif log_find_and_suggest_solutions:
+            print(f"Found solution of {solution_value} worse than current best solution\n")
 
     """
     In the MIPNODE stage of solving the problem, we can suggest previous

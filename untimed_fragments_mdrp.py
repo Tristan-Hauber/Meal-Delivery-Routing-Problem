@@ -7,14 +7,14 @@ Created on Fri Jul 29 09:24:49 2022
 """
 
 from gurobi import Model, quicksum, GRB
-from classes import Group, Arc, Data, Order
+from classes import Group, Arc, Data, Order, UntimedFragmentPath, Courier, Fragment
 from typing import List
 
 
 class UntimedFragmentsMDRP(Model):
     """
     A meal delivery routing problem model, solved using untimed path fragments.
-    
+
     Attributes
     ----------
     couriers : List[Courier]
@@ -23,6 +23,7 @@ class UntimedFragmentsMDRP(Model):
         The arcs used to solve the model.
     orders : List[Order]
         The orders needed to be delivered.
+
     """
 
     def __init__(
@@ -197,3 +198,64 @@ class UntimedFragmentsMDRP(Model):
             arc: self.addConstr(self.timings[arc] <= arc.latest_departure_time)
             for arc in self.arcs
         }
+
+    def get_untimed_path_fragment_path(self) -> List[UntimedFragmentPath]:
+        """
+        Create a list of paths through the network.
+
+        Each path through the network is of type UntimedFragmentPath, and this list of paths is spanning.
+
+        This function finds all activated untimed path fragments and transitions between those fragments. It chooses an arbitrary starting fragment, then follows the transitions until it comes to an exit fragment.
+
+        At the end of the function, it should have covered all activated fragments and transitions.
+
+        Returns
+        -------
+        List[UntimedFragmentPath]
+            A spanning list of UntimedFragmentPath through the network.
+
+        """
+        if self.paths is not None:
+            return self.paths
+        activated_untimed_path_fragments = set()
+        activated_starting_untimed_path_fragments = set()
+        for untimed_path_fragment in self.arcs:
+            if self.serviced[untimed_path_fragment] > 0.9:
+                if type(untimed_path_fragment.departure_location) == Courier:
+                    activated_starting_untimed_path_fragments.append(untimed_path_fragment)
+                else:
+                    activated_untimed_path_fragments.append(untimed_path_fragment)
+        activated_transitions = set()
+        for transition in self.successors:
+            if self.successors[transition] > 0.9:
+                activated_transitions.append(transition)
+        self.paths = list()
+        # Get a path start
+        while len(activated_starting_untimed_path_fragments) > 0:
+            path = list()
+            path.append(activated_starting_untimed_path_fragments.pop())
+            # Follow it to the end
+            while True:
+                found_following_fragment = False
+                for transition in activated_transitions:
+                    if transition[0] == path[-1]:
+                        new_untimed_path_fragment = transition[1]
+                        path.append(new_untimed_path_fragment)
+                        activated_untimed_path_fragments.remove(new_untimed_path_fragment)
+                        activated_transitions.remove(transition)
+                        found_following_fragment = True
+                        break
+                if type(path[-1].arrival_location) == Group:
+                    break
+                assert found_following_fragment
+            untimed_fragment_path = UntimedFragmentPath(path)
+            self.paths.append(untimed_fragment_path)
+        assert len(activated_transitions) == 0
+        assert len(activated_untimed_path_fragments) == 0
+        return self.paths
+
+    def convert_to_timed_path_fragments(self) -> List[Fragment]:
+        """Get a list of timed path fragments from the network."""
+        if self.paths is None:
+            self.get_untimed_path_fragment_path()
+        Fragment.get_timed_fragments_from_untimed_fragment_network(self.paths)

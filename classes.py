@@ -257,6 +257,7 @@ class Group(Location):
         self.off_time = shift_end_time
         self.couriers = list()
         self.code = f"g{len(Group.groups) + 1}"
+        self._arcs = None
         Group.groups.append(self)
 
     def get_earliest_arrival_at(self, restaurant: Restaurant) -> int:
@@ -305,6 +306,24 @@ class Group(Location):
     def __repr__(self) -> str:
         """Return repr(self)."""
         return self.__str__()
+
+    def get_arcs(self) -> List[Arc]:
+        """
+        Retrieve a list of all arcs serviced by the group.
+
+        Returns
+        -------
+        List[Arc]
+            A list of arcs serviced by the group.
+
+        """
+        if self._arcs is None:
+            self._arcs = list()
+            for arc in Arc.arcs:
+                if arc.group == self:
+                    if arc.departure_location != arc.arrival_location or arc.order_list != []:
+                        self._arcs.append(arc)
+        return self._arcs
 
 
 class Restaurant(Location):
@@ -1390,6 +1409,8 @@ class Fragment:
             if timed_fragment.order_list == list() and timed_fragment.arrival_location == timed_fragment.departure_location:
                 return timed_fragment
 
+    def get_fragments_from_orders(orders: Set[Order]) -> Set[Fragment]:
+        return set().union(set(Fragment.fragments_by_order[order]) for order in orders)
 
 class UntimedFragmentPath:
     """
