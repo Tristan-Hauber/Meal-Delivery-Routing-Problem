@@ -163,7 +163,9 @@ class UntimedFragmentsMDRP():
             for arc1 in predecessors
         }
         # All activated non-entry arcs must have a predecessor
-        self.has_predecessor = {arc2: self.uf_mdrp.addConstr(self.serviced[arc2] == quicksum(self.successors[arc1, arc2] for arc1 in arcs if (arc1, arc2) in self.successors)) for arc2 in successors}
+        self.has_predecessor = {
+            arc2: self.uf_mdrp.addConstr(
+                self.serviced[arc2] == quicksum(self.successors[arc1, arc2] for arc1 in arcs if (arc1, arc2) in self.successors)) for arc2 in successors}
         # All successors must start late enough for the previous to finish
         self.succ_timings = {
             (arc1, arc2): self.uf_mdrp.addConstr(
@@ -205,6 +207,14 @@ class UntimedFragmentsMDRP():
             arc: self.uf_mdrp.addConstr(self.timings[arc] <= arc.latest_departure_time)
             for arc in self.arcs
         }
+        # A courier may not service more than one entry arc
+        self.start_once = {courier: self.uf_mdrp.addConstr(
+            quicksum(
+                self.serviced[arc]
+                for arc in self.serviced
+                if arc.departure_location == courier)
+            <= 1)
+            for courier in self.couriers}
         """ ========== Attributes ========== """
         self.paths = None
 

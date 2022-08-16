@@ -1435,7 +1435,10 @@ class Fragment:
 
     def get_fragments_from_orders(orders: Set[Order]) -> Set[Fragment]:
         """Find and return the set of fragments that deliver the given set of orders."""
-        return set().union(set(Fragment.fragments_by_order[order]) for order in orders)
+        fragments = set()
+        for order in orders:
+            fragments.union(Fragment.fragments_by_order[order])
+        return fragments
 
 
 class UntimedFragmentPath:

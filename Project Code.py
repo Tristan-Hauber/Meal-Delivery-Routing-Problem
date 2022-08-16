@@ -989,8 +989,7 @@ def Callback(model, where):
             # Save activated fragments and delivered orders to suggest later
             mdrp._best_fragments = list()
             for group in group_fragments:
-                for fragment in group_fragments[group]:
-                    mdrp._best_fragments.append(fragment)
+                mdrp._best_fragments += group_fragments[group]
             mdrp._best_solution_value = solution_value
             if log_find_and_suggest_solutions:
                 print(
