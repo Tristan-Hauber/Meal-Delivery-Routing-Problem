@@ -1379,6 +1379,7 @@ class Fragment:
         for fragment in Fragment.fragments_by_arc[arc]:
             if fragment.departure_node == departure_node:
                 return fragment
+        assert False
 
     def __str__(self):
         """Return str(self)."""
@@ -1487,7 +1488,8 @@ class UntimedFragmentPath:
         location = self.path[0].departure_location
         for arc in self.path:
             # Check if next arc is too late to add
-            while arc.earliest_departure_time > current_time:
+            earliest_departure_time = min(fragment.departure_time for fragment in Fragment.fragments_by_arc[arc])
+            while current_time < earliest_departure_time:
                 # Add waiting fragment
                 waiting_fragment = Fragment.get_waiting_timed_fragment_from_node(Node.node_by_components[group, location, current_time])
                 timed_fragment_path.append(waiting_fragment)

@@ -871,7 +871,7 @@ def Callback(model, where):
                         )
                     )
                     if log_constraint_additions:
-                        print("Added optimality constraint")
+                        print(f"Added optimality constraint on {group}")
 
             else:
                 # Sub-model is infeasible, move to feasibility cuts
@@ -918,7 +918,7 @@ def Callback(model, where):
                     )
                 )
                 if log_constraint_additions:
-                    print("Added feasibility cut")
+                    print(f"Added feasibility cut on {group}")
 
                 # Add a valid inequality cut
                 if add_valid_inequality_to_callback:
