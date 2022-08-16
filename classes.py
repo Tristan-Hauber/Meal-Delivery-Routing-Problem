@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 
-from typing import List, Set, Dict, Tuple, Optional
+from typing import List, Set, Dict, Tuple
 
 
 class Data:
@@ -135,6 +135,7 @@ class Location:
         return Location.travel_times[(self, location)]
 
     def get_location(self) -> Tuple[int, int]:
+        """Return the location of the given object."""
         return (self.x, self.y)
 
 
@@ -200,6 +201,7 @@ class Courier(Location):
         )
 
     def get_group(self) -> Group:
+        """Return the group that the courier is part of."""
         for group in Group.groups:
             if self in group.couriers:
                 return group
@@ -883,6 +885,26 @@ class Arc:
             ] = self
 
     def dominate(arcs: List[Arc]) -> Set[Arc]:
+        """
+        Dominate a list of untimed path fragments.
+
+        The function takes as input a list of untimed path fragments. The last fragment in this
+        list is to be dominated against all other fragments in the list. We assume that all
+        other fragments in the list share an order list, and departure and arrival location.
+        Then one fragment dominates another if it has a later (or equal) departure time and
+        a shorter (or equal) travel time.
+
+        Parameters
+        ----------
+        arcs : List[Arc]
+            The list of untimed path fragments to be dominated.
+
+        Returns
+        -------
+        Set[Arc]
+            The set of untimed path fragments after domination.
+
+        """
         arc1 = arcs[-1]
         dominated_arcs = set()
         for arc2 in arcs[:-1]:
@@ -934,6 +956,7 @@ class Arc:
         )
 
     def get_succ(self) -> Set[Arc]:
+        """Find and return all possible successors of the given untimed path fragment."""
         if type(self.arrival_location) == Group:
             return set()
         assert type(self.arrival_location) == Restaurant
@@ -971,6 +994,7 @@ class Arc:
     def get_arc_from_components(
         group: Group, sequence: Sequence, arrival_location: Location
     ) -> Arc:
+        """Find and return the unique arc with the given components."""
         return Arc.arc_by_components[(group, sequence, arrival_location)]
 
     def __str__(self) -> str:
@@ -1386,7 +1410,7 @@ class Fragment:
         timed_path_fragments = list()
         for path in paths:
             timed_fragment_path = path.convert_to_timed_fragment_path()
-            for timed_fragment in timed_fragment_path:
+            for timed_fragment in timed_fragment_path.path:
                 timed_path_fragments.append(timed_fragment)
         return timed_path_fragments
 
@@ -1405,12 +1429,14 @@ class Fragment:
             The waiting timed fragment departing from the given node.
 
         """
-        for timed_fragment in Fragment.fragments_by_departure_node(node):
+        for timed_fragment in Fragment.fragments_by_departure_node[node]:
             if timed_fragment.order_list == list() and timed_fragment.arrival_location == timed_fragment.departure_location:
                 return timed_fragment
 
     def get_fragments_from_orders(orders: Set[Order]) -> Set[Fragment]:
+        """Find and return the set of fragments that deliver the given set of orders."""
         return set().union(set(Fragment.fragments_by_order[order]) for order in orders)
+
 
 class UntimedFragmentPath:
     """
@@ -1453,7 +1479,7 @@ class UntimedFragmentPath:
 
         """
         timed_fragment_path = list()
-        current_time = 0
+        current_time = self.path[0].earliest_departure_time
         for untimed_fragment in self.path:
             # Iterate through all the untimed fragments
             current_time = min(current_time, untimed_fragment.earliest_departure_time)
@@ -1467,7 +1493,15 @@ class UntimedFragmentPath:
                 group = best_timed_fragment.group
                 location = best_timed_fragment.departure_location
                 while current_time < best_timed_fragment.departure_time:
-                    node = Node.node_by_components[(group, location, current_time)]
+                    # Choose the node with the largest time before the current time (round the time down). If no nodes, round the time up to the lowest time.
+                    possible_nodes = list(node for node in Node.nodes_by_group_and_location[(group, location)] if node.time <= current_time)
+                    possible_nodes.sort(key=lambda node: node.time)
+                    if len(possible_nodes) == 0:
+                        possible_nodes = list(node for node in Node.nodes_by_group_and_location[(group, location)] if node.time > current_time)
+                        possible_nodes.sort(key=lambda node: node.time)
+                        node = possible_nodes[0]
+                    else:
+                        node = possible_nodes[-1]
                     waiting_timed_fragment = Fragment.get_waiting_timed_fragment_from_node(node)
                     timed_fragment_path.append(waiting_timed_fragment)
                     current_time = waiting_timed_fragment.arrival_time

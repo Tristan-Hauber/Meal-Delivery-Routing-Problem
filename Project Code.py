@@ -224,7 +224,6 @@ from classes import (
     Node,
     Fragment,
 )
-from solution_reader import SolutionReader, SolutionWriter
 from untimed_fragments_mdrp import UntimedFragmentsMDRP
 
 # Epoch time from program start
@@ -237,12 +236,12 @@ node_at_order_times = True
 # TODO: implement this switch
 time_discretisation = 10
 
-reduce_orders = False
+reduce_orders = True
 order_range_start = 1
 order_range_end = order_range_start + 74
 orders_to_avoid = set()
 
-reduce_couriers = False
+reduce_couriers = True
 courier_range_start = 1  # TODO: Implement this functionality
 courier_range_end = 61
 couriers_to_avoid = list(
@@ -268,8 +267,8 @@ add_valid_inequality_to_callback = False
 suggest_solution_after_optimality_constraints = True
 
 # Logging options
-log_find_and_suggest_solutions = False
-log_constraint_additions = False
+log_find_and_suggest_solutions = True
+log_constraint_additions = True
 
 
 def get_program_run_time() -> int:
@@ -724,11 +723,8 @@ def Callback(model, where):
             # Add activated arcs to the list
             group = fragment.group
             group_arcs[group].append(fragment.arc)
-            for order in fragment.orders:
+            for order in fragment.order_list:
                 group_orders[group].append(order)
-
-        # start as true, if group not feasible, set variable to false
-        all_groups_feasible = True
 
         # We have identified all activated fragments
         # Now we go through each courier group and build a sub-network
@@ -882,7 +878,6 @@ def Callback(model, where):
                 ipe.computeIIS()
                 infeasible_arcs = set()
                 # Not all groups are feasible
-                all_groups_feasible = False
 
                 # Add all infeasible arcs to our collection
                 for arc in arcs_serviced:
@@ -956,12 +951,11 @@ def Callback(model, where):
                         print(f"Added {VI_added} valid inequalities.")
 
                 # Create a new solution for the group
+                if log_find_and_suggest_solutions:
+                    print(f'Searching for new solution for {group}.')
                 submodel = UntimedFragmentsMDRP(group, group.get_arcs(), group_orders[group])
                 submodel.optimize()
-                undelivered_orders = list()
-                for order in submodel.deliveries:
-                    if submodel.deliveries[order].x < 0.1:
-                        undelivered_orders.append(order)
+                undelivered_orders = submodel.get_undelivered_orders()
                 # Add constraint on orders in the group
                 if len(undelivered_orders) > 0:
                     delivered_orders = list(order for order in submodel.deliveries if order not in undelivered_orders)
@@ -970,9 +964,13 @@ def Callback(model, where):
                         invalid_order_set.add(order)
                         invalid_fragment_set = set(fragment for fragment in Fragment.get_fragments_from_orders(invalid_order_set) if fragment.group == group)
                         mdrp.cbLazy(quicksum(fragments[fragment] * len(set(fragment.order_list).intersection(invalid_order_set)) for fragment in invalid_fragment_set) <= len(invalid_order_set) - 1)
+                    if log_constraint_additions:
+                        print(f'Limited {group} to {delivered_orders} and none of {undelivered_orders}.')
                 # Suggest a solution to Gurobi
                 group_payments[group] = submodel.objVal
                 group_fragments[group] = submodel.convert_to_timed_path_fragments()
+                if log_find_and_suggest_solutions:
+                    print(f'Found new solution for {group}.')
 
         """
         Suggest our constructed solution to Gurobi.
