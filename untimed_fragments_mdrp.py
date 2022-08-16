@@ -33,6 +33,8 @@ class UntimedFragmentsMDRP():
         orders: List[Order],
         cost_penalty=10000,
         cost_penalty_active=True,
+        time_limit=5,
+        gap=9989
     ):
         """
         Create a new meal delivery routing problem model.
@@ -53,6 +55,8 @@ class UntimedFragmentsMDRP():
         """
         self.uf_mdrp = Model('Untimed Fragments MDRP')
         self.uf_mdrp.setParam('OutputFlag', 0)
+        self.uf_mdrp.setParam('TimeLimit', time_limit)
+        self.uf_mdrp.setParam('MIPGapAbs', gap)
         """ ========== SETS ========== """
         self.couriers = group.couriers
         self.arcs = arcs

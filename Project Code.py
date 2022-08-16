@@ -236,12 +236,12 @@ node_at_order_times = True
 # TODO: implement this switch
 time_discretisation = 10
 
-reduce_orders = True
+reduce_orders = False
 order_range_start = 1
 order_range_end = order_range_start + 74
 orders_to_avoid = set()
 
-reduce_couriers = True
+reduce_couriers = False
 courier_range_start = 1  # TODO: Implement this functionality
 courier_range_end = 61
 couriers_to_avoid = list(
@@ -696,6 +696,7 @@ def Callback(model, where):
             print(
                 f"Checking new incumbent solution with value {mdrp.cbGet(GRB.Callback.MIPSOL_OBJ)}"
             )
+        suggest_solution = True
         # Get all activated fragments
         group_arcs = {group: [] for group in Group.groups}
         group_orders = {group: [] for group in Group.groups}
@@ -955,22 +956,37 @@ def Callback(model, where):
                     print(f'Searching for new solution for {group}.')
                 submodel = UntimedFragmentsMDRP(group, group.get_arcs(), group_orders[group])
                 submodel.optimize()
-                undelivered_orders = submodel.get_undelivered_orders()
-                # Add constraint on orders in the group
-                if len(undelivered_orders) > 0:
-                    delivered_orders = list(order for order in submodel.deliveries if order not in undelivered_orders)
-                    for order in undelivered_orders:
-                        invalid_order_set = set(delivered_orders)
-                        invalid_order_set.add(order)
-                        invalid_fragment_set = set(fragment for fragment in Fragment.get_fragments_from_orders(invalid_order_set) if fragment.group == group)
-                        mdrp.cbLazy(quicksum(fragments[fragment] * len(set(fragment.order_list).intersection(invalid_order_set)) for fragment in invalid_fragment_set) <= len(invalid_order_set) - 1)
-                    if log_constraint_additions:
-                        print(f'Limited {group} to {delivered_orders} and none of {undelivered_orders}.')
-                # Suggest a solution to Gurobi
-                group_payments[group] = submodel.objVal
-                group_fragments[group] = submodel.convert_to_timed_path_fragments()
-                if log_find_and_suggest_solutions:
-                    print(f'Found new solution for {group}.')
+                # Only proceed if we have at least one solution
+                if submodel.uf_mdrp.getAttr('Status') == GRB.OPTIMAL:
+                    if log_find_and_suggest_solutions:
+                        print(f'Solution found for {group}.')
+                    # Only add a constraint if the model solved close enough to optimality
+                    # Add constraint on orders in the group
+                    undelivered_orders = submodel.get_undelivered_orders()
+                    if len(undelivered_orders) > 0:
+                        delivered_orders = list(order for order in submodel.deliveries if order not in undelivered_orders)
+                        abs_gap = submodel.uf_mdrp.ObjVal - submodel.uf_mdrp.ObjBound
+                        worst_reduction = 10000 - Data.PAY_PER_DELIVERY
+                        deliverable_orders = math.ceil(abs_gap / worst_reduction)
+                        # TODO: Confirm that this maths checks out
+                        if deliverable_orders < len(undelivered_orders):
+                            for order_combination in itertools.combinations(undelivered_orders, deliverable_orders + 1):
+                                invalid_order_set = set(delivered_orders)
+                                invalid_order_set.union(order_combination)
+                                invalid_fragment_set = set(fragment for fragment in Fragment.get_fragments_from_orders(invalid_order_set) if fragment.group == group)
+                                mdrp.cbLazy(quicksum(fragments[fragment] * len(set(fragment.order_list).intersection(invalid_order_set)) for fragment in invalid_fragment_set) <= len(invalid_order_set) - 1)
+                            if log_constraint_additions:
+                                print(f'Limited {group} to {delivered_orders} and none of {undelivered_orders}.')
+                    # Suggest a solution to Gurobi
+                    if suggest_solution:
+                        group_payments[group] = submodel.objVal
+                        group_fragments[group] = submodel.convert_to_timed_path_fragments()
+                        if log_find_and_suggest_solutions:
+                            print(f'Found new solution for {group}.')
+                else:
+                    if log_find_and_suggest_solutions:
+                        print(f'No solution found for {group}. Will not suggest a solution.')
+                    suggest_solution = False
 
         """
         Suggest our constructed solution to Gurobi.
@@ -978,25 +994,29 @@ def Callback(model, where):
         If all groups are feasible, then we simply suggest the fragments that were activated at the beginning of the callback. If at least one group was infeasible, then we replace the fragments for that group with our new fragments.
         """
         # Calculate new solution value
-        solution_value = 0
-        for group in Group.groups:
-            solution_value += group_payments[group]
-        for order in orders:
-            if mdrp.cbGetSolution(orders[order]) < 0.1:
-                solution_value += 10000
-        # Compare to previous solution value
-        if solution_value + 0.0001 < mdrp._best_solution_value:
-            # Save activated fragments and delivered orders to suggest later
-            mdrp._best_fragments = list()
-            for group in group_fragments:
-                mdrp._best_fragments += group_fragments[group]
-            mdrp._best_solution_value = solution_value
+        if suggest_solution:
+            solution_value = 0
+            for group in Group.groups:
+                solution_value += group_payments[group]
+            for order in orders:
+                if mdrp.cbGetSolution(orders[order]) < 0.1:
+                    solution_value += 10000
+            # Compare to previous solution value
+            if solution_value + 0.0001 < mdrp._best_solution_value:
+                # Save activated fragments and delivered orders to suggest later
+                mdrp._best_fragments = list()
+                for group in group_fragments:
+                    mdrp._best_fragments += group_fragments[group]
+                mdrp._best_solution_value = solution_value
+                if log_find_and_suggest_solutions:
+                    print(
+                        f"Saved solution of value {solution_value} to suggest later\n"
+                    )
+            elif log_find_and_suggest_solutions:
+                print(f"Found solution of {solution_value} worse than current best solution\n")
+        else:
             if log_find_and_suggest_solutions:
-                print(
-                    f"Saved solution of value {solution_value} to suggest later\n"
-                )
-        elif log_find_and_suggest_solutions:
-            print(f"Found solution of {solution_value} worse than current best solution\n")
+                print()
 
     """
     In the MIPNODE stage of solving the problem, we can suggest previous
