@@ -1483,35 +1483,24 @@ class UntimedFragmentPath:
         """
         timed_fragment_path = list()
         current_time = self.path[0].earliest_departure_time
-        for untimed_fragment in self.path:
-            # Iterate through all the untimed fragments
-            current_time = min(current_time, untimed_fragment.earliest_departure_time)
-            best_timed_fragment = None
-            for timed_fragment in Fragment.fragments_by_arc[untimed_fragment]:
-                # Find the earliest timed fragment
-                if timed_fragment.departure_time >= current_time and (best_timed_fragment is None or timed_fragment.departure_time < best_timed_fragment.departure_time):
-                    best_timed_fragment = timed_fragment
-            if best_timed_fragment.departure_time != current_time:
-                # We need to add waiting arcs
-                group = best_timed_fragment.group
-                location = best_timed_fragment.departure_location
-                while current_time < best_timed_fragment.departure_time:
-                    # Choose the node with the largest time before the current time (round the time down). If no nodes, round the time up to the lowest time.
-                    possible_nodes = list(node for node in Node.nodes_by_group_and_location[(group, location)] if node.time <= current_time)
-                    possible_nodes.sort(key=lambda node: node.time)
-                    if len(possible_nodes) == 0:
-                        possible_nodes = list(node for node in Node.nodes_by_group_and_location[(group, location)] if node.time > current_time)
-                        possible_nodes.sort(key=lambda node: node.time)
-                        node = possible_nodes[0]
-                    else:
-                        node = possible_nodes[-1]
-                    waiting_timed_fragment = Fragment.get_waiting_timed_fragment_from_node(node)
-                    timed_fragment_path.append(waiting_timed_fragment)
-                    current_time = waiting_timed_fragment.arrival_time
-            # Add fragment to the list
-            timed_fragment_path.append(best_timed_fragment)
-            # Update time
-            current_time = best_timed_fragment.arrival_time
+        group = self.path[0].group
+        location = self.path[0].departure_location
+        for arc in self.path:
+            # Check if next arc is too late to add
+            while arc.earliest_departure_time > current_time:
+                # Add waiting fragment
+                waiting_fragment = Fragment.get_waiting_timed_fragment_from_node(Node.node_by_components[group, location, current_time])
+                timed_fragment_path.append(waiting_fragment)
+                # Update current_time
+                current_time = waiting_fragment.arrival_time
+            # Convert arc to fragment
+            departure_node = Node.node_by_components[(group, location, current_time)]
+            fragment = Fragment.get_fragment_by_arc_and_departure_node(arc, departure_node)
+            # Add fragment to path
+            timed_fragment_path.append(fragment)
+            # Update current_time
+            current_time = fragment.arrival_time
+            location = fragment.arrival_location
         return TimedFragmentPath(timed_fragment_path)
 
 
