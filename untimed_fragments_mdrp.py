@@ -6,17 +6,21 @@ Created on Fri Jul 29 09:24:49 2022
 @author: Tristan Hauber
 """
 
+from __future__ import annotations
+
 from gurobi import Model, quicksum, GRB
 from classes import Group, Arc, Data, Order, UntimedFragmentPath, Courier, Fragment
 from typing import List
 
 
-class UntimedFragmentsMDRP():
+class UntimedFragmentsMDRP:
     """
     A meal delivery routing problem model, solved using untimed path fragments.
 
     Attributes
     ----------
+    group : Group
+        The courier group on which the subproblem is defined.
     couriers : List[Courier]
         The couriers in the group.
     arcs : List[Arc]
@@ -26,6 +30,8 @@ class UntimedFragmentsMDRP():
 
     """
 
+    _model_from_group_and_orders = dict()
+
     def __init__(
         self,
         group: Group,
@@ -34,8 +40,9 @@ class UntimedFragmentsMDRP():
         cost_penalty=10000,
         cost_penalty_active=True,
         time_limit=5,
-        gap=9989
-    ):
+        gap=9989,
+        save_model=False
+    ) -> None:
         """
         Create a new meal delivery routing problem model.
 
@@ -53,15 +60,19 @@ class UntimedFragmentsMDRP():
         None.
 
         """
+        """ ========== SETUP ========== """
+        if save_model:
+            UntimedFragmentsMDRP._model_from_group_and_orders[(group, frozenset(orders))] = self
+        # Model
         self.uf_mdrp = Model('Untimed Fragments MDRP')
         self.uf_mdrp.setParam('OutputFlag', 0)
         self.uf_mdrp.setParam('TimeLimit', time_limit)
         self.uf_mdrp.setParam('MIPGapAbs', gap)
         """ ========== SETS ========== """
+        self.group = group
         self.couriers = group.couriers
         self.arcs = arcs
         self.orders = orders
-
         """ ========== VARIABLES ========== """
         # Payment to each courier
         self.courier_payments = {courier: self.uf_mdrp.addVar() for courier in self.couriers}
@@ -292,3 +303,9 @@ class UntimedFragmentsMDRP():
         """Return a list of all undelivered orders in the model."""
         self.uf_mdrp.update()
         return list(order for order in self.deliveries if self.deliveries[order].x < 0.1)
+
+    def get_ufmdrp(group: Group, orders: List[Order]) -> UntimedFragmentsMDRP:
+        """Return the model built on the given courier group and order set."""
+        if (group, frozenset(orders)) in UntimedFragmentsMDRP._model_from_group_and_orders:
+            return UntimedFragmentsMDRP._model_from_group_and_orders[(group, frozenset(orders))]
+        return None
