@@ -264,7 +264,7 @@ add_valid_inequality_to_model = False
 add_valid_inequality_after_LP = False
 add_valid_inequality_to_callback = False
 
-suggest_solution_after_optimality_constraints = True
+suggest_solution = True
 
 # Logging options
 log_find_and_suggest_solutions = True
