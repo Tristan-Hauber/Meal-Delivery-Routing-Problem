@@ -236,12 +236,12 @@ node_at_order_times = True
 # TODO: implement this switch
 time_discretisation = 10
 
-reduce_orders = False
+reduce_orders = True
 order_range_start = 1
 order_range_end = order_range_start + 74
 orders_to_avoid = set()
 
-reduce_couriers = False
+reduce_couriers = True
 courier_range_start = 1  # TODO: Implement this functionality
 courier_range_end = 61
 couriers_to_avoid = list(
@@ -264,7 +264,7 @@ add_valid_inequality_to_model = False
 add_valid_inequality_after_LP = False
 add_valid_inequality_to_callback = False
 
-suggest_solution_after_optimality_constraints = True
+suggest_and_repair_solutions = False
 
 # Logging options
 log_find_and_suggest_solutions = True
@@ -696,7 +696,7 @@ def Callback(model, where):
             print(
                 f"Checking new incumbent solution with value {mdrp.cbGet(GRB.Callback.MIPSOL_OBJ)}"
             )
-        suggest_solution = True
+        suggest_solution = suggest_and_repair_solutions
         # Get all activated fragments
         group_arcs = {group: [] for group in Group.groups}
         group_orders = {group: [] for group in Group.groups}
@@ -951,10 +951,19 @@ def Callback(model, where):
                     if log_constraint_additions:
                         print(f"Added {VI_added} valid inequalities.")
 
+                if not suggest_solution:
+                    continue
                 # Create a new solution for the group
                 if log_find_and_suggest_solutions:
-                    print(f'Searching for new solution for {group}.')
-                submodel = UntimedFragmentsMDRP(group, group.get_arcs(), group_orders[group])
+                    print(f'Searching for new solution for {group} with orders {group_orders[group]}.')
+                submodel = UntimedFragmentsMDRP.get_ufmdrp(group, group_orders[group])
+                # Check to see if already created submodel
+                if submodel is None:
+                    submodel = UntimedFragmentsMDRP(group, group.get_arcs(), group_orders[group], save_model=True)
+                else:
+                    if log_find_and_suggest_solutions:
+                        print('Retrieving existing model.')
+                    submodel.uf_mdrp.Params.time_limit += 5
                 submodel.optimize()
                 # Only proceed if we have at least one solution
                 if submodel.uf_mdrp.getAttr('Status') == GRB.OPTIMAL:
@@ -976,7 +985,7 @@ def Callback(model, where):
                                 invalid_fragment_set = set(fragment for fragment in Fragment.get_fragments_from_orders(invalid_order_set) if fragment.group == group)
                                 mdrp.cbLazy(quicksum(fragments[fragment] * len(set(fragment.order_list).intersection(invalid_order_set)) for fragment in invalid_fragment_set) <= len(invalid_order_set) - 1)
                             if log_constraint_additions:
-                                print(f'Limited {group} to {delivered_orders} and none of {undelivered_orders}.')
+                                print(f'Limited {group} to {delivered_orders} and no group of {deliverable_orders + 1} orders from {undelivered_orders}.')
                     # Suggest a solution to Gurobi
                     if suggest_solution:
                         group_payments[group] = submodel.objVal
