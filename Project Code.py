@@ -260,8 +260,9 @@ cost_penalty_active = True
 
 group_by_off_time = True
 
+""" ========== Valid Inequalities ========== """
 add_valid_inequality_to_model = False
-add_valid_inequality_after_LP = False
+add_valid_inequality_after_LP = True
 add_valid_inequality_to_callback = False
 
 suggest_and_repair_solutions = False
@@ -606,51 +607,70 @@ if add_valid_inequality_to_model:
     }
 print(f"Model finished constructing at t = {get_program_run_time()}.\n")
 
-while True:
+"""
+Add Valid Inequalities to the model after solving the relaxed LP.
 
-    mdrp.optimize()
+The program will repeatedly solve the LP, then check the arcs corresponding
+with all activated fragments to check that they have the correct number of
+predecessors and successors activated. If too few predecessors or successors
+are activated, then a valid inequality will be added to the model, and the LP
+solved again.
+"""
 
-    VI_added: int = 0
-
-    if add_valid_inequality_after_LP:
+if add_valid_inequality_after_LP:
+    mdrp.Params.outputflag = 0
+    total_VI = 0
+    while True:
+        mdrp.optimize()
+    
+        VI_added: int = 0
+    
         activated_arcs = set()
+        # Find all activated arcs
         for fragment in fragments:
             if fragments[fragment].x > 0.01:
                 activated_arcs.add(fragment.arc)
+    
+        # Add Valid Inequalities for the activated arcs
         for arc in activated_arcs:
-            pred_fragments = set(
-                fragment
-                for pred in arc.get_pred()
-                for fragment in Fragment.fragments_by_arc[pred]
-            )
-            succ_fragments = set(
-                fragment
-                for succ in arc.get_succ()
-                for fragment in Fragment.fragments_by_arc[succ]
-            )
+            # Find value for arc
             arc_fragments = set(fragment for fragment in Fragment.fragments_by_arc[arc])
-
-            pred_values = sum(fragments[fragment].x for fragment in pred_fragments)
-            succ_values = sum(fragments[fragment].x for fragment in succ_fragments)
             arc_value = sum(fragments[fragment].x for fragment in arc_fragments)
-
-            if pred_values < arc_value:
-                mdrp.addConstr(
-                    quicksum(fragments[fragment] for fragment in pred_fragments)
-                    >= quicksum(fragments[fragment] for fragment in arc_fragments)
+            # Add Valid Inequalities (if broken) on predecessors
+            if type(arc.departure_location) is not Courier:
+                pred_fragments = set(
+                    fragment
+                    for pred in arc.get_pred()
+                    for fragment in Fragment.fragments_by_arc[pred]
                 )
-                VI_added += 1
-
-            if succ_values > arc_value:
-                mdrp.addConstr(
-                    quicksum(fragments[fragment] for fragment in succ_fragments)
-                    >= quicksum(fragments[fragment] for fragment in arc_fragments)
+                pred_values = sum(fragments[fragment].x for fragment in pred_fragments)
+                if pred_values < arc_value:
+                    mdrp.addConstr(
+                        quicksum(fragments[fragment] for fragment in pred_fragments)
+                        >= quicksum(fragments[fragment] for fragment in arc_fragments)
+                    )
+                    VI_added += 1
+            # Add Valid Inequalities (if broken) on successors
+            if type(arc.arrival_location) is not Group:
+                succ_fragments = set(
+                    fragment
+                    for succ in arc.get_succ()
+                    for fragment in Fragment.fragments_by_arc[succ]
                 )
-                VI_added += 1
-        print(f"Added {VI_added} violated valid inequalities.")
-
-    if VI_added == 0:
-        break
+                succ_values = sum(fragments[fragment].x for fragment in succ_fragments)
+                if succ_values > arc_value:
+                    mdrp.addConstr(
+                        quicksum(fragments[fragment] for fragment in succ_fragments)
+                        >= quicksum(fragments[fragment] for fragment in arc_fragments)
+                    )
+                    VI_added += 1
+        print(f"Added {VI_added} violated valid inequalities at t = {get_program_run_time()}.")
+    
+        if VI_added == 0:
+            break
+        total_VI += VI_added
+    print(f'Added {total_VI} Valid Inequalities in total at t = {get_program_run_time()}.\n')
+    mdrp.Params.outputflag = 1
 
 # lpgap = 0.01*mdrp.objVal
 # rcList = [v for v in fragments.values() if v.rc > lpgap]
