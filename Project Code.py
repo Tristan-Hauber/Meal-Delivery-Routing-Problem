@@ -264,7 +264,7 @@ add_valid_inequality_to_model = False
 add_valid_inequality_after_LP = False
 add_valid_inequality_to_callback = False
 
-suggest_solution = True
+suggest_and_repair_solutions = False
 
 # Logging options
 log_find_and_suggest_solutions = True
@@ -696,7 +696,7 @@ def Callback(model, where):
             print(
                 f"Checking new incumbent solution with value {mdrp.cbGet(GRB.Callback.MIPSOL_OBJ)}"
             )
-        suggest_solution = True
+        suggest_solution = suggest_and_repair_solutions
         # Get all activated fragments
         group_arcs = {group: [] for group in Group.groups}
         group_orders = {group: [] for group in Group.groups}
@@ -951,6 +951,8 @@ def Callback(model, where):
                     if log_constraint_additions:
                         print(f"Added {VI_added} valid inequalities.")
 
+                if not suggest_solution:
+                    continue
                 # Create a new solution for the group
                 if log_find_and_suggest_solutions:
                     print(f'Searching for new solution for {group} with orders {group_orders[group]}.')
