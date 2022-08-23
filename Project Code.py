@@ -236,12 +236,12 @@ node_at_order_times = True
 # TODO: implement this switch
 time_discretisation = 10
 
-reduce_orders = True
+reduce_orders = False
 order_range_start = 1
 order_range_end = order_range_start + 74
 orders_to_avoid = set()
 
-reduce_couriers = True
+reduce_couriers = False
 courier_range_start = 1  # TODO: Implement this functionality
 courier_range_end = 61
 couriers_to_avoid = list(
@@ -505,10 +505,10 @@ mdrp.setParam("Method", 2)
 # mdrp.setParam('PrePasses', 1)
 
 print("Creating variables.")
-fragments = {fragment: mdrp.addVar(ub=1) for fragment in Fragment.fragments}
-orders = {order: mdrp.addVar(ub=1) for order in Order.orders}
+fragments = {fragment: mdrp.addVar() for fragment in Fragment.fragments}
+orders = {order: mdrp.addVar() for order in Order.orders}
 payments = {group: mdrp.addVar() for group in Group.groups}
-couriers = {courier: mdrp.addVar(ub=1) for courier in Courier.couriers}
+couriers = {courier: mdrp.addVar() for courier in Courier.couriers}
 
 if consider_objective:
     print("Defining objective.")
