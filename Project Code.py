@@ -236,12 +236,12 @@ node_at_order_times = True
 # TODO: implement this switch
 time_discretisation = 10
 
-reduce_orders = False
+reduce_orders = True
 order_range_start = 1
-order_range_end = order_range_start + 74
+order_range_end = order_range_start + 29
 orders_to_avoid = set()
 
-reduce_couriers = False
+reduce_couriers = True
 courier_range_start = 1  # TODO: Implement this functionality
 courier_range_end = 61
 couriers_to_avoid = list(
@@ -265,7 +265,7 @@ add_valid_inequality_to_model = False
 add_valid_inequality_after_LP = True
 add_valid_inequality_to_callback = False
 
-suggest_and_repair_solutions = False
+suggest_and_repair_solutions = True
 
 # Logging options
 log_find_and_suggest_solutions = True
@@ -644,7 +644,7 @@ if add_valid_inequality_after_LP:
                     for fragment in Fragment.fragments_by_arc[pred]
                 )
                 pred_values = sum(fragments[fragment].x for fragment in pred_fragments)
-                if pred_values < arc_value:
+                if pred_values < arc_value - 0.1:
                     mdrp.addConstr(
                         quicksum(fragments[fragment] for fragment in pred_fragments)
                         >= quicksum(fragments[fragment] for fragment in arc_fragments)
@@ -658,7 +658,7 @@ if add_valid_inequality_after_LP:
                     for fragment in Fragment.fragments_by_arc[succ]
                 )
                 succ_values = sum(fragments[fragment].x for fragment in succ_fragments)
-                if succ_values > arc_value:
+                if succ_values < arc_value - 0.1:
                     mdrp.addConstr(
                         quicksum(fragments[fragment] for fragment in succ_fragments)
                         >= quicksum(fragments[fragment] for fragment in arc_fragments)
@@ -1012,6 +1012,7 @@ def Callback(model, where):
                         group_fragments[group] = submodel.convert_to_timed_path_fragments()
                         if log_find_and_suggest_solutions:
                             print(f'Found new solution for {group}.')
+                        # Add a lazy optimality constraint here.
                 else:
                     if log_find_and_suggest_solutions:
                         print(f'No solution found for {group}. Will not suggest a solution.')
