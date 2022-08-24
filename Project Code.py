@@ -263,7 +263,7 @@ group_by_off_time = True
 """ ========== Valid Inequalities ========== """
 add_valid_inequality_to_model = False
 add_valid_inequality_after_LP = True
-add_valid_inequality_to_callback = False
+add_valid_inequality_to_callback = True
 
 suggest_and_repair_solutions = True
 
@@ -953,33 +953,36 @@ def Callback(model, where):
 
                 # Add a valid inequality cut
                 if add_valid_inequality_to_callback:
-                    VI_added: int = 0
-                    for arc in infeasible_arcs:
-                        mdrp.cbLazy(
-                            quicksum(
-                                fragments[fragment]
-                                for pred in arc.get_pred()
-                                for fragment in Fragment.fragments_by_arc[pred]
+                    callback_VI_added = 0
+                    for infeasible_arc in infeasible_arcs:
+                        if type(infeasible_arc.departure_location) != Courier:
+                            mdrp.cbLazy(
+                                quicksum(
+                                    fragments[fragment]
+                                    for predecessor in infeasible_arc.get_pred()
+                                    for fragment in Fragment.fragments_by_arc[predecessor]
+                                )
+                                >= quicksum(
+                                    fragments[fragment]
+                                    for fragment in Fragment.fragments_by_arc[infeasible_arc]
+                                )
                             )
-                            >= quicksum(
-                                fragments[fragment]
-                                for fragment in Fragment.fragments_by_arc[arc]
+                            callback_VI_added += 1
+                        if type(infeasible_arc.arrival_location) != Group:
+                            mdrp.cbLazy(
+                                quicksum(
+                                    fragments[fragment]
+                                    for successor in infeasible_arc.get_succ()
+                                    for fragment in Fragment.fragments_by_arc[successor]
+                                )
+                                >= quicksum(
+                                    fragments[fragment]
+                                    for fragment in Fragment.fragments_by_arc[infeasible_arc]
+                                )
                             )
-                        )
-                        mdrp.cbLazy(
-                            quicksum(
-                                fragments[fragment]
-                                for succ in arc.get_succ()
-                                for fragment in Fragment.fragments_by_arc[succ]
-                            )
-                            >= quicksum(
-                                fragments[fragment]
-                                for fragment in Fragment.fragments_by_arc[arc]
-                            )
-                        )
-                        VI_added += 2
+                            callback_VI_added += 1
                     if log_constraint_additions:
-                        print(f"Added {VI_added} valid inequalities.")
+                        print(f"Added {callback_VI_added} valid inequalities.")
 
                 if not suggest_solution:
                     continue
