@@ -236,12 +236,12 @@ node_at_order_times = True
 # TODO: implement this switch
 time_discretisation = 10
 
-reduce_orders = True
+reduce_orders = False
 order_range_start = 1
 order_range_end = order_range_start + 29
 orders_to_avoid = set()
 
-reduce_couriers = True
+reduce_couriers = False
 courier_range_start = 1  # TODO: Implement this functionality
 courier_range_end = 61
 couriers_to_avoid = list(
