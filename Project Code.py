@@ -344,8 +344,8 @@ for restaurant in Restaurant.restaurants:
                 if order not in sequence.order_list:
                     new_sequence = sequence.add_order(order)
                     if (
-                        new_sequence.latest_departure_time
-                        >= new_sequence.earliest_departure_time
+                            new_sequence.latest_departure_time
+                            >= new_sequence.earliest_departure_time
                     ):
                         work_area.append(new_sequence)
 print("Sequence creation complete.")
@@ -366,16 +366,16 @@ for sequence in Sequence.sequences:
                 sequence.departure_location
             )
             if (
-                group.off_time >= sequence.earliest_departure_time
-                and earliest_departure_time <= sequence.latest_departure_time
+                    group.off_time >= sequence.earliest_departure_time
+                    and earliest_departure_time <= sequence.latest_departure_time
             ):
                 Arc(group, sequence, group)  # Creation of an exit arc
                 for restaurant in Restaurant.restaurants:
                     earliest_arrival_time = (
-                        earliest_departure_time
-                        + sequence.travel_time
-                        + restaurant.get_time_to(sequence.order_list[-1])
-                        + (Data.DROPOFF_SERVICE_TIME + Data.PICKUP_SERVICE_TIME) / 2
+                            earliest_departure_time
+                            + sequence.travel_time
+                            + restaurant.get_time_to(sequence.order_list[-1])
+                            + (Data.DROPOFF_SERVICE_TIME + Data.PICKUP_SERVICE_TIME) / 2
                     )
                     deliverable_orders = set(
                         order
@@ -466,8 +466,8 @@ for arc in Arc.arcs:
     ]
     for node in departure_nodes:
         if (
-            node.time >= arc.earliest_departure_time
-            and node.time <= arc.latest_departure_time
+                node.time >= arc.earliest_departure_time
+                and node.time <= arc.latest_departure_time
         ):
             Fragment(node, arc)
 print("Created path fragments.")
@@ -591,20 +591,28 @@ couriers_start_once = {
 }
 
 if add_valid_inequality_to_model:
-    valid_inequalities = {
-        arc: mdrp.addConstr(
-            quicksum(
-                fragments[fragment]
-                for pred in arc.get_pred()
-                for fragment in Fragment.fragments_by_arc[pred]
-            )
-            >= quicksum(
-                fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]
-            )
-        )
-        for arc in Arc.arcs
-        if type(arc.departure_location) != Courier
-    }
+    predecessor_valid_inequalities = {arc: mdrp.addConstr(quicksum(
+        fragments[fragment]
+        for predecessor in arc.get_pred()
+        for fragment in Fragment.fragments_by_arc[predecessor]
+    )
+                                                          >= quicksum(
+        fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]
+        ), name=f'predecessor valid inequality for {arc}')
+                                      for arc in Arc.arcs
+                                      if type(arc.departure_location) != Courier
+                                      }
+    successor_valid_inequalities = {arc: mdrp.addConstr(quicksum(
+        fragments[fragment]
+        for successor in arc.get_succ()
+        for fragment in Fragment.fragments_by_arc[successor]
+    )
+                                                        >= quicksum(
+        fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]
+    ), name=f'successor valid inequality for {arc}')
+                                    for arc in Arc.arcs
+                                    if type(arc.arrival_location) != Group
+                                    }
 print(f"Model finished constructing at t = {get_program_run_time()}.\n")
 
 """
@@ -622,15 +630,15 @@ if add_valid_inequality_after_LP:
     total_VI = 0
     while True:
         mdrp.optimize()
-    
+
         VI_added: int = 0
-    
+
         activated_arcs = set()
         # Find all activated arcs
         for fragment in fragments:
             if fragments[fragment].x > 0.01:
                 activated_arcs.add(fragment.arc)
-    
+
         # Add Valid Inequalities for the activated arcs
         for arc in activated_arcs:
             # Find value for arc
@@ -665,7 +673,7 @@ if add_valid_inequality_after_LP:
                     )
                     VI_added += 1
         print(f"Added {VI_added} violated valid inequalities at t = {get_program_run_time()}.")
-    
+
         if VI_added == 0:
             break
         total_VI += VI_added
@@ -736,8 +744,8 @@ def Callback(model, where):
 
             # We don't care about any fragments that aren't moving between locations, that is, waiting fragments
             if (
-                len(fragment.order_list) == 0
-                and fragment.departure_location == fragment.arrival_location
+                    len(fragment.order_list) == 0
+                    and fragment.departure_location == fragment.arrival_location
             ):
                 continue
 
@@ -790,7 +798,8 @@ def Callback(model, where):
             ipe = Model("Illegal Path Elimination")
             ipe.setParam("OutputFlag", 0)
             courier_payments = {courier: ipe.addVar() for courier in group.couriers}
-            successors = {(arc1, arc2): ipe.addVar(vtype=GRB.BINARY) for arc1 in successors_of_arc for arc2 in successors_of_arc[arc1]}
+            successors = {(arc1, arc2): ipe.addVar(vtype=GRB.BINARY) for arc1 in successors_of_arc for arc2 in
+                          successors_of_arc[arc1]}
             timings = {arc: ipe.addVar() for arc in arcs}
             assignments = {
                 (courier, arc): ipe.addVar(vtype=GRB.BINARY)
@@ -833,7 +842,8 @@ def Callback(model, where):
                 for arc in arcs
             }
             # All non-exit arcs must have a successor (eq 12)
-            have_succ = {arc1: ipe.addConstr(quicksum(successors[arc1, arc2] for arc2 in successors_of_arc[arc1]) == 1) for arc1 in arcs if arc1.arrival_location != arc1.group}
+            have_succ = {arc1: ipe.addConstr(quicksum(successors[arc1, arc2] for arc2 in successors_of_arc[arc1]) == 1)
+                         for arc1 in arcs if arc1.arrival_location != arc1.group}
             # All successors must start late enough for the previous to finish (eq 15)
             succ_timings = {
                 (arc1, arc2): ipe.addConstr(
@@ -841,9 +851,9 @@ def Callback(model, where):
                     <= timings[arc2]
                     + (1 - successors[arc1, arc2])
                     * (
-                        arc1.latest_departure_time
-                        + arc1.travel_time
-                        - arc2.earliest_departure_time
+                            arc1.latest_departure_time
+                            + arc1.travel_time
+                            - arc2.earliest_departure_time
                     )
                 )
                 for (arc1, arc2) in successors
@@ -882,13 +892,13 @@ def Callback(model, where):
                         payments[group]
                         >= group_payment
                         * (
-                            1
-                            - len(arcs)
-                            + quicksum(
-                                fragments[fragment]
-                                for arc in arcs
-                                for fragment in Fragment.fragments_by_arc[arc]
-                            )
+                                1
+                                - len(arcs)
+                                + quicksum(
+                            fragments[fragment]
+                            for arc in arcs
+                            for fragment in Fragment.fragments_by_arc[arc]
+                        )
                         )
                     )
                     if log_constraint_additions:
@@ -993,7 +1003,8 @@ def Callback(model, where):
                     # Add constraint on orders in the group
                     undelivered_orders = submodel.get_undelivered_orders()
                     if len(undelivered_orders) > 0:
-                        delivered_orders = list(order for order in submodel.deliveries if order not in undelivered_orders)
+                        delivered_orders = list(
+                            order for order in submodel.deliveries if order not in undelivered_orders)
                         abs_gap = submodel.uf_mdrp.ObjVal - submodel.uf_mdrp.ObjBound
                         worst_reduction = 10000 - Data.PAY_PER_DELIVERY
                         deliverable_orders = math.ceil(abs_gap / worst_reduction)
@@ -1002,10 +1013,15 @@ def Callback(model, where):
                             for order_combination in itertools.combinations(undelivered_orders, deliverable_orders + 1):
                                 invalid_order_set = set(delivered_orders)
                                 invalid_order_set.union(order_combination)
-                                invalid_fragment_set = set(fragment for fragment in Fragment.get_fragments_from_orders(invalid_order_set) if fragment.group == group)
-                                mdrp.cbLazy(quicksum(fragments[fragment] * len(set(fragment.order_list).intersection(invalid_order_set)) for fragment in invalid_fragment_set) <= len(invalid_order_set) - 1)
+                                invalid_fragment_set = set(
+                                    fragment for fragment in Fragment.get_fragments_from_orders(invalid_order_set) if
+                                    fragment.group == group)
+                                mdrp.cbLazy(quicksum(
+                                    fragments[fragment] * len(set(fragment.order_list).intersection(invalid_order_set))
+                                    for fragment in invalid_fragment_set) <= len(invalid_order_set) - 1)
                             if log_constraint_additions:
-                                print(f'Limited {group} to {delivered_orders} and no group of {deliverable_orders + 1} orders from {undelivered_orders}.')
+                                print(
+                                    f'Limited {group} to {delivered_orders} and no group of {deliverable_orders + 1} orders from {undelivered_orders}.')
                     # Suggest a solution to Gurobi
                     if suggest_solution:
                         group_payments[group] = submodel.objVal
@@ -1055,8 +1071,8 @@ def Callback(model, where):
     Gurobi to implement into the path.
     """
     if (
-        where == GRB.Callback.MIPNODE
-        and mdrp._best_solution_value + 0.0001 < mdrp.cbGet(GRB.Callback.MIPNODE_OBJBST)
+            where == GRB.Callback.MIPNODE
+            and mdrp._best_solution_value + 0.0001 < mdrp.cbGet(GRB.Callback.MIPNODE_OBJBST)
     ):
         # Give Gurobi values for all fragments according to our solution
         activated_fragment_variables = list()
@@ -1067,7 +1083,8 @@ def Callback(model, where):
             else:
                 non_activated_fragment_variables.append(fragments[fragment])
         mdrp.cbSetSolution(activated_fragment_variables, list(1 for _ in range(len(activated_fragment_variables))))
-        mdrp.cbSetSolution(non_activated_fragment_variables, list(0 for _ in range(len(non_activated_fragment_variables))))
+        mdrp.cbSetSolution(non_activated_fragment_variables,
+                           list(0 for _ in range(len(non_activated_fragment_variables))))
         objVal = mdrp.cbUseSolution()
         if log_find_and_suggest_solutions:
             print(f'Suggested value of {mdrp._best_solution_value}, Gurobi found {objVal}')
