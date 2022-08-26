@@ -989,17 +989,17 @@ def Callback(model, where):
                 # Create a new solution for the group
                 if log_find_and_suggest_solutions:
                     print(f'Searching for new solution for {group} with orders {group_orders[group]}.')
-                submodel = UntimedFragmentsMDRP.get_ufmdrp(group, group_orders[group])
+                submodel = UntimedFragmentsMDRP.get_arc_model(group, group_orders[group])
                 # Check to see if already created submodel
                 if submodel is None:
                     submodel = UntimedFragmentsMDRP(group, group.get_arcs(), group_orders[group], save_model=True)
                 else:
                     if log_find_and_suggest_solutions:
                         print('Retrieving existing model.')
-                    submodel.uf_mdrp.Params.time_limit += 5
+                    submodel.Params.time_limit += 5
                 submodel.optimize()
                 # Only proceed if we have at least one solution
-                if submodel.uf_mdrp.getAttr('Status') == GRB.OPTIMAL:
+                if submodel.getAttr('Status') == GRB.OPTIMAL:
                     if log_find_and_suggest_solutions:
                         print(f'Solution found for {group}.')
                     # Only add a constraint if the model solved close enough to optimality
@@ -1026,12 +1026,9 @@ def Callback(model, where):
                                 print(
                                     f'Limited {group} to {delivered_orders} and no group of {deliverable_orders + 1} orders from {undelivered_orders}.')
                     # Suggest a solution to Gurobi
-                    if suggest_solution:
-                        group_payments[group] = submodel.objVal
-                        group_fragments[group] = submodel.convert_to_timed_path_fragments()
-                        if log_find_and_suggest_solutions:
-                            print(f'Found new solution for {group}.')
-                        # Add a lazy optimality constraint here.
+                    group_payments[group] = submodel.objVal
+                    group_fragments[group] = submodel.convert_to_timed_path_fragments()
+                    # Add a lazy optimality constraint here.
                 else:
                     if log_find_and_suggest_solutions:
                         print(f'No solution found for {group}. Will not suggest a solution.')
