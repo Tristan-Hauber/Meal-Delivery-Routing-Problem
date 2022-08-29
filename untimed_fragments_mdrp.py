@@ -8,7 +8,7 @@ Created on Fri Jul 29 09:24:49 2022
 
 from __future__ import annotations
 
-from gurobi import Model, quicksum, GRB
+from gurobipy import Model, quicksum, GRB
 from classes import Group, Arc, Data, Order, UntimedFragmentPath, Courier, Fragment
 from typing import List
 
@@ -33,8 +33,8 @@ class UntimedFragmentsMDRP(Model):
     _model_from_group_and_orders = dict()
 
     def __init__(self, group: Group, arcs: List[Arc], orders: List[Order], cost_penalty: int = 10000,
-                 cost_penalty_active: bool = True, time_limit: int = 5, gap: int = 9989, save_model: bool = False,
-                 *args: object, **kwargs: object) -> None:
+                 cost_penalty_active: bool = False, time_limit: int = GRB.INFINITY, gap: int = 1e-10,
+                 save_model: bool = False, *args: object, **kwargs: object) -> None:
         """
         Create a new meal delivery routing problem model.
 
@@ -223,6 +223,10 @@ class UntimedFragmentsMDRP(Model):
                 if arc.departure_location == courier)
             <= 1)
             for courier in self._couriers}
+        # There must be as many exit arcs as entry arcs
+        self._in_equals_out = self.addConstr(
+            quicksum(self._serviced[arc] for arc in self._arcs if type(arc.departure_location) == Courier)
+            == quicksum(self._serviced[arc] for arc in self._arcs if type(arc.arrival_location) == Group))
         """ ========== Attributes ========== """
         self._paths = None
 
@@ -301,3 +305,11 @@ class UntimedFragmentsMDRP(Model):
         """Return the model built on the given courier group and order set."""
         if (group, frozenset(orders)) in UntimedFragmentsMDRP._model_from_group_and_orders:
             return UntimedFragmentsMDRP._model_from_group_and_orders[(group, frozenset(orders))]
+
+    def get_infeasible_arcs(self) -> List[Arc]:
+        """Return all arcs involved in the IIS."""
+        infeasible_arcs = list()
+        for arc in self._has_predecessor:
+            if self._has_predecessor[arc].IISConstr:
+                infeasible_arcs.append(arc)
+        return infeasible_arcs
