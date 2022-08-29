@@ -236,12 +236,12 @@ node_at_order_times = True
 # TODO: implement this switch
 time_discretisation = 10
 
-reduce_orders = False
+reduce_orders = True
 order_range_start = 1
-order_range_end = 40
+order_range_end = 50
 orders_to_avoid = set()
 
-reduce_couriers = False
+reduce_couriers = True
 courier_range_start = 1  # TODO: Implement this functionality
 courier_range_end = 61
 couriers_to_avoid = list(
@@ -1046,6 +1046,7 @@ def Callback(model: Model, where: int, suggest_solutions: bool = True, improve_s
                                          <= len(infeasible_order_set) - 1)
                         group_orders[group] = delivered_orders
                         group_payments[group] = submodel.objVal - 10000 * len(undelivered_orders)
+                        extra_costs += 10000 * len(undelivered_orders)
                     else:
                         group_payments[group] = submodel.objVal
                         delivered_orders = group_orders[group]
