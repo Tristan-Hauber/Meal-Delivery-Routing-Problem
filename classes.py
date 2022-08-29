@@ -1005,41 +1005,43 @@ class Arc:
         """Return repr(self)."""
         return self.__str__()
 
+    @staticmethod
     def get_arcs_for_orders(orders: List[Order], group: Group) -> List[Arc]:
-        """
-        Get all arcs that deliver orders from the given list, and are serviced by the given group.
-
-        Parameters
-        ----------
-        orders : List[Order]
-            The list of orders to retrieve arcs for.
-        group : Group
-            The courier group to retrieve arcs for.
-
-        Returns
-        -------
-        List[Arc]
-            The list of arcs containing the given orders, serviced by the given group.
-
-        """
-        order_set = set(orders)
-
-        arrival_locations = list()
-        for restaurant in Order.group_orders_by_restaurant(orders):
-            arrival_locations.append(restaurant)
-        arrival_locations.append(group)
-
+        """Get all arcs for a given group that are not waiting arcs, and deliver at least one of the given orders."""
         arcs = list()
-        for key in Arc.arcs_by_group_and_order_set_and_arrival_location.keys():
-            if (
-                key[0] == group
-                and key[1].issubset(order_set)
-                and key[2] in arrival_locations
-            ):
-                for arc in Arc.arcs_by_group_and_order_set_and_arrival_location[key]:
-                    arcs.append(arc)
-
+        for arc in Arc.arcs:
+            if arc.group == group:
+                # arc is for the right group
+                if len(arc.order_list) > 0 or arc.arrival_location != arc.departure_location:
+                    # arc is not a waiting arc
+                    if type(arc.departure_location) == Courier:
+                        arcs.append(arc)
+                    else:
+                        order_set = set(orders)
+                        common_orders = order_set.intersection(arc.order_list)
+                        if len(common_orders) > 0:
+                            arcs.append(arc)
         return arcs
+
+    @staticmethod
+    def get_arcs_with_orders(orders: List[Order], group: Group) -> List[Arc]:
+        """Get all arcs for a given group that deliver at least one of the given orders, and no others."""
+        arcs = list()
+        arrival_locations = set()
+        for order in orders:
+            arrival_locations.add(order.departure_restaurant)
+        arrival_locations.add(group)
+        for arc in Arc.arcs:
+            if arc.group == group and arc.arrival_location in arrival_locations:
+                # arc is for the right group and goes to the right place
+                if len(arc.order_list) > 0 or arc.departure_location != arc.arrival_location:
+                    if set(arc.order_list).issubset(orders):
+                        arcs.append(arc)
+        return arcs
+
+    def get_fragments(self) -> List[Fragment]:
+        """Return a list of fragments corresponding to the given arc."""
+        return Fragment.fragments_by_arc[self]
 
 
 class Node:
@@ -1439,6 +1441,14 @@ class Fragment:
         fragments = set()
         for order in orders:
             fragments.union(Fragment.fragments_by_order[order])
+        return fragments
+
+    @staticmethod
+    def get_fragments_from_arcs(arcs: List[Arc]) -> List[Fragment]:
+        """Get a list of fragments corresponding to the given list of arcs."""
+        fragments = list()
+        for arc in arcs:
+            fragments += arc.get_fragments()
         return fragments
 
 
