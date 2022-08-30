@@ -238,7 +238,7 @@ time_discretisation = 10
 
 reduce_orders = True
 order_range_start = 1
-order_range_end = 50
+order_range_end = 40
 orders_to_avoid = set()
 
 reduce_couriers = True
@@ -946,28 +946,13 @@ def Callback(model: Model, where: int, suggest_solutions: bool = True, improve_s
                 # Not all groups are feasible
 
                 # Add all infeasible arcs to our collection
-                for arc in arcs_serviced:
-                    if arcs_serviced[arc].IISConstr:
-                        infeasible_arcs.add(arc)
                 for arc in have_succ:
                     if have_succ[arc].IISConstr:
                         infeasible_arcs.add(arc)
-                for (arc1, arc2) in succ_timings:
-                    if succ_timings[(arc1, arc2)].IISConstr:
-                        infeasible_arcs.add(arc1)
-                        infeasible_arcs.add(arc2)
-                for (arc1, arc2, cour) in cour_serv_succ:
-                    if cour_serv_succ[(arc1, arc2, cour)].IISConstr:
-                        infeasible_arcs.add(arc1)
-                        infeasible_arcs.add(arc2)
-                for arc in begin_on_time:
-                    if begin_on_time[arc].IISConstr:
-                        infeasible_arcs.add(arc)
-                for arc in end_on_time:
-                    if end_on_time[arc].IISConstr:
-                        infeasible_arcs.add(arc)
 
                 # Add a feasibility cut (eq 18)
+                # sum(infeasible_arcs) <= num(infeasible_arcs) - 1 + sum(alternative_successors)
+                alternative_successors = list(succ for succ in Arc.get_succ_to_arcs(infeasible_arcs) if succ not in infeasible_arcs)
                 mdrp.cbLazy(
                     quicksum(
                         fragments[fragment]
@@ -978,9 +963,8 @@ def Callback(model: Model, where: int, suggest_solutions: bool = True, improve_s
                     - 1
                     + quicksum(
                         fragments[fragment]
-                        for pred in Arc.get_pred_to_arcs(infeasible_arcs)
-                        if pred not in arcs
-                        for fragment in Fragment.fragments_by_arc[pred]
+                        for succ in alternative_successors
+                        for fragment in Fragment.fragments_by_arc[succ]
                     )
                 )
                 print(f"Added feasibility cut for {group} on arcs")
