@@ -12,6 +12,9 @@ from gurobipy import Model, quicksum, GRB
 from classes import Group, Arc, Data, Order, UntimedFragmentPath, Courier, Fragment
 from typing import List
 
+import time
+import math
+
 
 class UntimedFragmentsMDRP(Model):
     """
@@ -52,6 +55,7 @@ class UntimedFragmentsMDRP(Model):
         None.
 
         """
+        self._model_initiation = time.time()
         super().__init__(*args, **kwargs)
         """ ========== SETUP ========== """
         if save_model:
@@ -91,6 +95,8 @@ class UntimedFragmentsMDRP(Model):
             and arc1.arrival_location == arc2.departure_location
             and arc1.earliest_departure_time + arc1.travel_time <= arc2.latest_departure_time
         }
+        self.update()
+        print(f'{self.getAttr(GRB.Attr.NumVars)} variables created, t={math.ceil(time.time() - self._model_initiation)}')
 
         """ ========== OBJECTIVE ========== """
         self.setObjective(
@@ -101,14 +107,6 @@ class UntimedFragmentsMDRP(Model):
         )
 
         """ ========== CONSTRAINTS ========== """
-        # Pay couriers for their time
-        self._time_payments = {
-            courier: self.addConstr(
-                self._courier_payments[courier]
-                >= (courier.off_time - courier.on_time) / 60 * Data.MIN_PAY_PER_HOUR
-            )
-            for courier in self._couriers
-        }
         # Pay couriers for their deliveries
         self._delivery_payments = {
             courier: self.addConstr(
@@ -119,6 +117,14 @@ class UntimedFragmentsMDRP(Model):
                     * Data.PAY_PER_DELIVERY
                     for arc in self._arcs
                 )
+            )
+            for courier in self._couriers
+        }
+        # Pay couriers for their time
+        self._time_payments = {
+            courier: self.addConstr(
+                self._courier_payments[courier]
+                >= (courier.off_time - courier.on_time) / 60 * Data.MIN_PAY_PER_HOUR
             )
             for courier in self._couriers
         }
@@ -227,6 +233,8 @@ class UntimedFragmentsMDRP(Model):
         self._in_equals_out = self.addConstr(
             quicksum(self._serviced[arc] for arc in self._arcs if type(arc.departure_location) == Courier)
             == quicksum(self._serviced[arc] for arc in self._arcs if type(arc.arrival_location) == Group))
+        self.update()
+        print(f'{self.getAttr(GRB.Attr.NumConstrs)} constraints created, t={math.ceil(time.time() - self._model_initiation)}')
         """ ========== Attributes ========== """
         self._paths = None
 
@@ -313,3 +321,8 @@ class UntimedFragmentsMDRP(Model):
             if self._has_predecessor[arc].IISConstr:
                 infeasible_arcs.append(arc)
         return infeasible_arcs
+
+    def optimize(self):
+        super().optimize()
+        print(f'Optimisation complete, t={math.ceil(time.time() - self._model_initiation)}')
+

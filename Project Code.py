@@ -509,7 +509,7 @@ print("Creating variables.")
 fragments = {fragment: mdrp.addVar() for fragment in Fragment.fragments}
 orders = {order: mdrp.addVar() for order in Order.orders}
 payments = {group: mdrp.addVar() for group in Group.groups}
-couriers = {courier: mdrp.addVar() for courier in Courier.couriers}
+couriers = {courier: mdrp.addVar(ub=1) for courier in Courier.couriers}
 
 if consider_objective:
     print("Defining objective.")
@@ -625,9 +625,9 @@ are activated, then a valid inequality will be added to the model, and the LP
 solved again.
 """
 
+VI = set()
 if add_valid_inequality_after_LP:
     mdrp.Params.outputflag = 0
-    total_VI = 0
     while True:
         mdrp.optimize()
 
@@ -653,11 +653,12 @@ if add_valid_inequality_after_LP:
                 )
                 pred_values = sum(fragments[fragment].x for fragment in pred_fragments)
                 if pred_values < arc_value - 0.1:
-                    mdrp.addConstr(
+                    predecessor_VI = mdrp.addConstr(
                         quicksum(fragments[fragment] for fragment in pred_fragments)
                         >= quicksum(fragments[fragment] for fragment in arc_fragments)
                     )
                     VI_added += 1
+                    VI.add(predecessor_VI)
             # Add Valid Inequalities (if broken) on successors
             if type(arc.arrival_location) is not Group:
                 succ_fragments = set(
@@ -667,17 +668,16 @@ if add_valid_inequality_after_LP:
                 )
                 succ_values = sum(fragments[fragment].x for fragment in succ_fragments)
                 if succ_values < arc_value - 0.1:
-                    mdrp.addConstr(
+                    successor_VI = mdrp.addConstr(
                         quicksum(fragments[fragment] for fragment in succ_fragments)
                         >= quicksum(fragments[fragment] for fragment in arc_fragments)
                     )
                     VI_added += 1
-        print(f"Added {VI_added} violated valid inequalities at t = {get_program_run_time()}.")
-
+                    VI.add(successor_VI)
+        print(f"Added {VI_added} violated valid inequalities at t = {get_program_run_time()}, objective = {mdrp.ObjVal}.")
         if VI_added == 0:
             break
-        total_VI += VI_added
-    print(f'Added {total_VI} Valid Inequalities in total at t = {get_program_run_time()}.\n')
+    print(f'Added {len(VI)} Valid Inequalities in total at t = {get_program_run_time()}.\n')
     mdrp.Params.outputflag = 1
 
 # lpgap = 0.01*mdrp.objVal
