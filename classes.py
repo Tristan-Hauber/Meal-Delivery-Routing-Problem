@@ -1043,6 +1043,14 @@ class Arc:
         """Return a list of fragments corresponding to the given arc."""
         return Fragment.fragments_by_arc[self]
 
+    @staticmethod
+    def get_succ_to_arcs(arcs: Set[Arc]) -> Set[Arc]:
+        """Get all successors to the given list of arcs."""
+        successors = set()
+        for arc in arcs:
+            successors.union(arc.get_succ())
+        return successors
+
 
 class Node:
     """
