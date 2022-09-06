@@ -923,21 +923,37 @@ def Callback(model: Model, where: int, suggest_solutions: bool = True, improve_s
                                                            for fragment in Fragment.fragments_by_arc[arc])))
                 print(f"Added optimality constraint for {group} on arcs")
                 # Add an optimality cut for the group on the orders
-                submodel = UntimedFragmentsMDRP(group, Arc.get_arcs_with_orders(group_orders[group], group),
-                                                group_orders[group], cost_penalty_active=True)
+                submodel = UntimedFragmentsMDRP.get_arc_model(group, group_orders[group])
+                if submodel is None:
+                    submodel = UntimedFragmentsMDRP(group, Arc.get_arcs_with_orders(group_orders[group], group),
+                                                    group_orders[group], cost_penalty_active=True, save_model=True,
+                                                    time_limit=60)
+                else:
+                    submodel.setAttr('TimeLimit', submodel.getAttr('TimeLimit') + 60)
                 submodel.optimize()
-                submodel_orders = group_orders[group]
-                submodel_arcs = Arc.get_arcs_for_orders(group_orders[group], group)
-                submodel_fragments = Fragment.get_fragments_from_arcs(submodel_arcs)
-                model.cbLazy(payments[group]
-                             >= submodel.objVal * (quicksum(fragments[fragment]
-                                                            * len(set(fragment.order_list).intersection(submodel_orders))
-                                                            for fragment in submodel_fragments)
-                                                   - len(submodel_orders) + 1))
-                print(f'Added optimality constraint for {group} on orders {group_orders[group]} of value {submodel.objVal}')
-                print(f'Saved solution for {group} of {submodel.objVal} on orders {group_orders[group]}')
-                print()
-                model._solved_subproblems.add((group, frozenset(group_orders[group])))
+                if submodel.getAttr('Status') == GRB.OPTIMAL:
+                    submodel_orders = group_orders[group]
+                    submodel_arcs = Arc.get_arcs_for_orders(group_orders[group], group)
+                    submodel_fragments = Fragment.get_fragments_from_arcs(submodel_arcs)
+                    model.cbLazy(payments[group]
+                                 >= submodel.objVal * (quicksum(fragments[fragment]
+                                                                * len(set(fragment.order_list).intersection(submodel_orders))
+                                                                for fragment in submodel_fragments)
+                                                       - len(submodel_orders) + 1))
+                    print(f'Added optimality constraint for {group} on orders {group_orders[group]} of value {submodel.objVal}')
+                    print(f'Saved solution for {group} of {submodel.objVal} on orders {group_orders[group]}')
+                    print()
+                    model._solved_subproblems.add((group, frozenset(group_orders[group])))
+                else:
+                    assert submodel.getAttr('Status') == GRB.SUBOPTIMAL
+                    print(f'Not solved to optimality, adding optimality constraint on arcs')
+                    submodel_arcs = submodel.get_activated_arcs()
+                    submodel_fragments = Fragment.get_fragments_from_arcs(submodel_arcs)
+                    undelivered_orders = submodel.get_undelivered_orders()
+                    objective_value = submodel.objVal - len(undelivered_orders)
+                    model.cbLazy(payments[group] >= objective_value * (quicksum(fragments[fragment] for fragment in submodel_fragments) - len(submodel_arcs) + 1))
+                    group_fragments[group] = submodel_fragments
+                    group_payments[group] = objective_value
 
             else:
                 # Sub-model is infeasible, move to feasibility cuts
@@ -1004,8 +1020,13 @@ def Callback(model: Model, where: int, suggest_solutions: bool = True, improve_s
 
                 # Create a new solution for the group
                 print(f'Searching for new solution for {group} with orders {group_orders[group]}.')
-                submodel = UntimedFragmentsMDRP(group, Arc.get_arcs_with_orders(group_orders[group], group),
-                                                    group_orders[group], cost_penalty_active=True)
+                submodel = UntimedFragmentsMDRP.get_arc_model(group, group_orders[group])
+                if submodel is None:
+                    submodel = UntimedFragmentsMDRP(group, Arc.get_arcs_with_orders(group_orders[group], group),
+                                                    group_orders[group], cost_penalty_active=True, save_model=True,
+                                                    time_limit=60)
+                else:
+                    submodel.setAttr('TimeLimit', submodel.getAttr('Timelimit') + 60)
                 submodel.optimize()
                 # Only proceed if we have at least one solution
                 if submodel.getAttr('Status') == GRB.OPTIMAL:
@@ -1049,6 +1070,19 @@ def Callback(model: Model, where: int, suggest_solutions: bool = True, improve_s
                     print(f'Saved solution for {group} of {group_payments[group]} for orders {group_orders[group]}')
                     model._solved_subproblems.add((group, frozenset(group_orders[group])))
                     print()
+                else:
+                    assert submodel.getAttr('Status') == GRB.SUBOPTIMAL
+                    print(f'Model not solved to completion, adding an optimality cut on arcs.')
+                    undelivered_orders = submodel.get_undelivered_orders()
+                    submodel_arcs = submodel.get_activated_arcs()
+                    objective_value = submodel.objVal - len(undelivered_orders)
+                    # Add optimality cut on activated arcs
+                    activated_fragments = Fragment.get_fragments_from_arcs(list(submodel_arcs))
+                    model.cbLazy(payments[group] >= objective_value * (quicksum(
+                        fragments[fragment] for fragment in activated_fragments) - len(activated_arcs) + 1))
+                    group_fragments[group] = submodel.convert_to_timed_path_fragments()
+                    group_payments[group] = objective_value
+
 
         """
         Suggest our constructed solution to Gurobi.

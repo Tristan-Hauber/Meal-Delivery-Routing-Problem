@@ -326,3 +326,10 @@ class UntimedFragmentsMDRP(Model):
         super().optimize()
         print(f'Optimisation complete, t={math.ceil(time.time() - self._model_initiation)}')
 
+    def get_activated_arcs(self) -> Set[Arc]:
+        """Return a set of all activated arcs"""
+        activated_arcs = set()
+        for arc in self._arcs:
+            if self._serviced[arc].x > 0.9:
+                activated_arcs.add(arc)
+        return activated_arcs
