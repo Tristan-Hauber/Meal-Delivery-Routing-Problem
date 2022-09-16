@@ -1400,7 +1400,8 @@ class Fragment:
         for fragment in Fragment.fragments_by_arc[arc]:
             if fragment.departure_node == departure_node:
                 return fragment
-        assert False
+        else:
+            assert False
 
     def __str__(self):
         """Return str(self)."""

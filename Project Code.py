@@ -224,6 +224,8 @@ from classes import (
     Node,
     Fragment,
 )
+from typing import Set, Dict, Tuple, FrozenSet
+from network import SubNetwork
 from untimed_fragments_mdrp import UntimedFragmentsMDRP, ArcModelNoCourierAssignments
 
 # Epoch time from program start
@@ -238,7 +240,7 @@ time_discretisation = 10
 
 reduce_orders = True
 order_range_start = 1
-order_range_end = 30
+order_range_end = 75
 orders_to_avoid = set()
 
 reduce_couriers = True
@@ -499,6 +501,7 @@ print("Constructing model.")
 mdrp = Model("Meal Delivery Routing Problem")
 mdrp.setParam("LazyConstraints", 1)
 mdrp.setParam("Method", 2)
+mdrp.setParam("MIPGAP", 0.1)
 # Tuning suggested parameters:
 # mdrp.setParam('DegenMoves', 1)
 # mdrp.setParam('Heuristics', 0.001)
@@ -506,32 +509,32 @@ mdrp.setParam("Method", 2)
 # mdrp.setParam('PrePasses', 1)
 
 print("Creating variables.")
-fragments = {fragment: mdrp.addVar() for fragment in Fragment.fragments}
-orders = {order: mdrp.addVar() for order in Order.orders}
-payments = {group: mdrp.addVar() for group in Group.groups}
-couriers = {courier: mdrp.addVar(ub=1) for courier in Courier.couriers}
+fragment_variables = {fragment: mdrp.addVar() for fragment in Fragment.fragments}
+order_variables = {order: mdrp.addVar() for order in Order.orders}
+payment_variables = {group: mdrp.addVar() for group in Group.groups}
+courier_variables = {courier: mdrp.addVar(ub=1) for courier in Courier.couriers}
 
 if consider_objective:
     print("Defining objective.")
     if cost_penalty_active:
         mdrp.setObjective(
-            quicksum(payments[group] for group in Group.groups)
-            + 10000 * quicksum(1 - orders[order] for order in Order.orders)
+            quicksum(payment_variables[group] for group in Group.groups)
+            + 10000 * quicksum(1 - order_variables[order] for order in Order.orders)
         )
     else:
-        mdrp.setObjective(quicksum(payments[group] for group in Group.groups))
+        mdrp.setObjective(quicksum(payment_variables[group] for group in Group.groups))
 
 print("Creating constraints.")
 if consider_objective:
     pay_for_deliveries = {
         group: mdrp.addConstr(
-            payments[group]
+            payment_variables[group]
             >= quicksum(
-                fragments[fragment] * len(fragment.order_list) * Data.PAY_PER_DELIVERY
+                fragment_variables[fragment] * len(fragment.order_list) * Data.PAY_PER_DELIVERY
                 for fragment in Fragment.fragments_by_group[group]
             )
             + quicksum(
-                (1 - couriers[courier])
+                (1 - courier_variables[courier])
                 * Data.MIN_PAY_PER_HOUR
                 * (courier.off_time - courier.on_time)
                 / 60
@@ -543,35 +546,35 @@ if consider_objective:
 
     pay_for_time = {
         group: mdrp.addConstr(
-            payments[group] >= Data.MIN_PAY_PER_HOUR * group.get_total_on_time() / 60
+            payment_variables[group] >= Data.MIN_PAY_PER_HOUR * group.get_total_on_time() / 60
         )
         for group in Group.groups
     }
 
 deliver_all_orders = {
     order: mdrp.addConstr(
-        quicksum(fragments[fragment] for fragment in Fragment.fragments_by_order[order])
-        == orders[order]
+        quicksum(fragment_variables[fragment] for fragment in Fragment.fragments_by_order[order])
+        == order_variables[order]
     )
     for order in Order.orders
 }
 
 if cost_penalty_active is False:
     all_orders_on = {
-        order: mdrp.addConstr(orders[order] == 1) for order in Order.orders
+        order: mdrp.addConstr(order_variables[order] == 1) for order in Order.orders
     }
 else:
     all_orders_on = {
-        order: mdrp.addConstr(orders[order] <= 1) for order in Order.orders
+        order: mdrp.addConstr(order_variables[order] <= 1) for order in Order.orders
     }
 
 flow_in_equals_flow_out = {
     node: mdrp.addConstr(
         quicksum(
-            fragments[fragment] for fragment in Fragment.fragments_by_arrival_node[node]
+            fragment_variables[fragment] for fragment in Fragment.fragments_by_arrival_node[node]
         )
         == quicksum(
-            fragments[fragment]
+            fragment_variables[fragment]
             for fragment in Fragment.fragments_by_departure_node[node]
         )
     )
@@ -582,33 +585,33 @@ flow_in_equals_flow_out = {
 couriers_start_once = {
     courier: mdrp.addConstr(
         quicksum(
-            fragments[fragment]
+            fragment_variables[fragment]
             for fragment in Fragment.departure_fragments_by_courier[courier]
         )
-        == couriers[courier]
+        == courier_variables[courier]
     )
     for courier in Courier.couriers
 }
 
 if add_valid_inequality_to_model:
     predecessor_valid_inequalities = {arc: mdrp.addConstr(quicksum(
-        fragments[fragment]
+        fragment_variables[fragment]
         for predecessor in arc.get_pred()
         for fragment in Fragment.fragments_by_arc[predecessor]
     )
                                                           >= quicksum(
-        fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]
+        fragment_variables[fragment] for fragment in Fragment.fragments_by_arc[arc]
     ), name=f'predecessor valid inequality for {arc}')
                                       for arc in Arc.arcs
                                       if type(arc.departure_location) != Courier
                                       }
     successor_valid_inequalities = {arc: mdrp.addConstr(quicksum(
-        fragments[fragment]
+        fragment_variables[fragment]
         for successor in arc.get_succ()
         for fragment in Fragment.fragments_by_arc[successor]
     )
                                                         >= quicksum(
-        fragments[fragment] for fragment in Fragment.fragments_by_arc[arc]
+        fragment_variables[fragment] for fragment in Fragment.fragments_by_arc[arc]
     ), name=f'successor valid inequality for {arc}')
                                     for arc in Arc.arcs
                                     if type(arc.arrival_location) != Group
@@ -635,15 +638,15 @@ if add_valid_inequality_after_LP:
 
         activated_arcs = set()
         # Find all activated arcs
-        for fragment in fragments:
-            if fragments[fragment].x > 0.01:
+        for fragment in fragment_variables:
+            if fragment_variables[fragment].x > 0.01:
                 activated_arcs.add(fragment.arc)
 
         # Add Valid Inequalities for the activated arcs
         for arc in activated_arcs:
             # Find value for arc
             arc_fragments = set(fragment for fragment in Fragment.fragments_by_arc[arc])
-            arc_value = sum(fragments[fragment].x for fragment in arc_fragments)
+            arc_value = sum(fragment_variables[fragment].x for fragment in arc_fragments)
             # Add Valid Inequalities (if broken) on predecessors
             if type(arc.departure_location) is not Courier:
                 pred_fragments = set(
@@ -651,11 +654,11 @@ if add_valid_inequality_after_LP:
                     for pred in arc.get_pred()
                     for fragment in Fragment.fragments_by_arc[pred]
                 )
-                pred_values = sum(fragments[fragment].x for fragment in pred_fragments)
+                pred_values = sum(fragment_variables[fragment].x for fragment in pred_fragments)
                 if pred_values < arc_value - 0.1:
                     predecessor_VI = mdrp.addConstr(
-                        quicksum(fragments[fragment] for fragment in pred_fragments)
-                        >= quicksum(fragments[fragment] for fragment in arc_fragments)
+                        quicksum(fragment_variables[fragment] for fragment in pred_fragments)
+                        >= quicksum(fragment_variables[fragment] for fragment in arc_fragments)
                     )
                     VI_added += 1
                     VI.add(predecessor_VI)
@@ -666,11 +669,11 @@ if add_valid_inequality_after_LP:
                     for succ in arc.get_succ()
                     for fragment in Fragment.fragments_by_arc[succ]
                 )
-                succ_values = sum(fragments[fragment].x for fragment in succ_fragments)
+                succ_values = sum(fragment_variables[fragment].x for fragment in succ_fragments)
                 if succ_values < arc_value - 0.1:
                     successor_VI = mdrp.addConstr(
-                        quicksum(fragments[fragment] for fragment in succ_fragments)
-                        >= quicksum(fragments[fragment] for fragment in arc_fragments)
+                        quicksum(fragment_variables[fragment] for fragment in succ_fragments)
+                        >= quicksum(fragment_variables[fragment] for fragment in arc_fragments)
                     )
                     VI_added += 1
                     VI.add(successor_VI)
@@ -686,493 +689,267 @@ if add_valid_inequality_after_LP:
 # print(len(rcList), "set to 0")
 # mdrp.addConstr(quicksum(rcList) == 0)
 
-for fragment in fragments:
-    fragments[fragment].vtype = GRB.BINARY
-for order in orders:
-    orders[order].vtype = GRB.BINARY
-for courier in couriers:
-    couriers[courier].vtype = GRB.BINARY
+for fragment in fragment_variables:
+    fragment_variables[fragment].vtype = GRB.BINARY
+for order in order_variables:
+    order_variables[order].vtype = GRB.BINARY
+for courier in courier_variables:
+    courier_variables[courier].vtype = GRB.BINARY
 
 mdrp._best_solution_value = GRB.INFINITY
 mdrp._solved_subproblems = dict()
 
 
-def Callback(model: Model, where: int, suggest_solutions: bool = True, improve_solutions: bool = True,
-             repair_solutions: bool = True, print_log: bool = True, print_debug: bool = False) -> None:
+def get_length_of_order_overlap(fragment: Fragment, orders: FrozenSet[Order]) -> int:
+    """Return the number of orders in the order list that overlap with the given order set."""
+    return len(set(fragment.order_list).intersection(orders))
+
+
+def add_lazy_optimality_cut_on_orders(model: Model, group: Group, orders: FrozenSet[Order], objective: float) -> None:
+    """Add a lazy optimality cut on the given orders, for the given model."""
+    arcs = Arc.get_arcs_for_orders(list(orders), group)
+    cut_fragments = Fragment.get_fragments_from_arcs(arcs)
+    model.cbLazy(
+        payment_variables[group] >= objective * (quicksum(fragment_variables[fragment]
+                                                          * get_length_of_order_overlap(fragment, orders)
+                                                          for fragment in cut_fragments)
+                                                 - len(orders) + 1))
+
+
+def add_lazy_optimality_cut_on_arcs(model: Model, group: Group, arcs: FrozenSet[Arc], objective: float) -> None:
+    """Add a lazy optimality cut on the given arcs, for the given model."""
+    cut_fragments = Fragment.get_fragments_from_arcs(list(arcs))
+    model.cbLazy(
+        payment_variables[group] >= objective * (
+                    quicksum(fragment_variables[fragment] for fragment in cut_fragments) - len(arcs) + 1))
+
+
+def add_lazy_optimality_cut_on_fragments(model: Model, group: Group, fragments: FrozenSet[Fragment], objective: float) -> None:
+    """Add a lazy optimality cut on the given fragments, for the given model."""
+    model.cbLazy(
+        payment_variables[group] >= objective * (
+                    quicksum(fragment_variables[fragment] for fragment in fragments) - len(fragments) + 1))
+
+
+def add_lazy_feasibility_cut_on_arcs(model: Model, group: Group, arcs: FrozenSet[Arc]) -> None:
+    """Add a lazy feasibility cut on the given arcs, for the given model."""
+    fragments_for_cut = set(Fragment.get_fragments_from_arcs(list(arcs)))
+    alternative_fragments = set(Fragment.fragments_by_group[group]) - fragments_for_cut
+    model.cbLazy(quicksum(fragment_variables[fragment] for fragment in fragments_for_cut)
+                 <= len(fragments_for_cut) - 1 + quicksum(
+        fragment_variables[fragment] for fragment in alternative_fragments))
+
+
+def add_lazy_feasibility_cut_on_orders(model: Model, group: Group, feasible_orders: Set[Order],
+                                       infeasible_orders: Set[Order]) -> None:
+    """Add a lazy feasibility cut on the given orders, for the given model."""
+    for order in infeasible_orders:
+        orders_for_cut = list(feasible_orders)
+        orders_for_cut.append(order)
+        arcs_for_cut = Arc.get_arcs_with_orders(orders_for_cut, group)
+        fragments_for_cut = Fragment.get_fragments_from_arcs(arcs_for_cut)
+        model.cbLazy(quicksum(fragment_variables[fragment]
+                              * get_length_of_order_overlap(fragment, frozenset(orders_for_cut))
+                              for fragment in fragments_for_cut)
+                     <= len(orders_for_cut) - 1)
+
+
+def callback(model: Model, where: int) -> None:
+    """A callback to handle feasibility and optimality cuts for the TF Model"""
     """
-    Check provided solutions for feasibility and optimality.
+    for each group:
+        find all assigned orders
+        if (group, orders) pair already considered:
 
-    Whenever Gurobi finds an integer solution, we pass into the callback
-    function. This function starts off by checking the provided solution for
-    feasibility. If infeasible, it adds a cut on the arcs. If feasible, it then
-    checks to see if an optimality cut is needed. If so, it adds an optimality
-    cut on the arcs.
+            if group objective value is too low:
+                add optimality cut on group for orders
+                save retrieved solution for suggestion
+            else:
+                save existing solution for suggestion
 
-    In the callback, we also have the option to suggest solutions back to Gurobi
-    to help the solver come up with optimal solutions.
+        else:
+            find all used arcs for group
+            solve UFModel on arcs
+            if necessary, add feasibility cut on arcs
+            if necessary, add optimality cut on arcs
 
-    The path of the function goes roughly like this:
+            solve UFModel on orders
+            if reached optimality:
+                if necessary, add feasibility cut(s) on orders
+                if necessary, add optimality cut on orders
+                save (group, orders) pair as considered
+            elif reached time limit:
+                if necessary, add feasibility cut(s) on orders
+                if necessary, add optimality cut on arcs
 
-    for every courier group:
-        1. Check provided solution for feasibility.
-        2. If needed, add a feasibility cut.
-        3. Else if needed, add an optimality cut.
-        4. If suggesting solutions to Gurobi, suggest feasible solution
-        - If repairing solutions:
-            5. Find feasible solution on orders
-        - If improving existing solutions:
-            6. Find improved solution on orders
+            if improved or arcs infeasible, save calculated solution for suggestion
 
-    Notes
-    -----
-    If suggest_solutions is false, then neither improve_solutions nor
-    repair_solutions have any effect.
-
-    Parameters
-    ----------
-    model : Model
-        The model the callback is being called on.
-    where : int
-        The current location in the solve.
-    suggest_solutions : bool
-        Whether to suggest feasible solutions after optimality cuts.
-    improve_solutions : bool
-        Whether to look for more cost-effective solutions after optimality cuts.
-    repair_solutions : bool
-        Whether to find feasible solutions from infeasible solutions.
-    print_log : bool
-        Whether to keep track of progress.
-    print_debug : bool
-        Whether to keep track of problematic variables.
-
-    Returns
-    -------
-    None
+    tally up group totals
+    if group totals + extra sufficiently small:
+        suggest all fragments
+        suggest all group totals
     """
     if where == GRB.Callback.MIPSOL:
-        print('--------------------------------------------------')
-        print(f"Checking new incumbent solution with value {mdrp.cbGet(GRB.Callback.MIPSOL_OBJ)}")
-        suggest_solution = suggest_and_repair_solutions
-        # Get all activated fragments
-        group_arcs = {group: [] for group in Group.groups}
-        group_orders = {group: [] for group in Group.groups}
-        group_fragments = {group: [] for group in Group.groups}
-        group_payments = {group: model.cbGetSolution(payments[group]) for group in Group.groups}
-        extra_costs = 0
+        print('-' * 50)
+        print(f'Checking found solution of value {model.cbGet(GRB.Callback.MIPSOL_OBJ)}')
+        # saved_solution[group] = (objective_value, extra_costs, solution_fragments)
+        saved_solution: Dict[Group: Tuple[float, float, Set[Fragment]]] = dict()
 
-        for fragment in fragments:
-
-            if mdrp.cbGetSolution(fragments[fragment]) < 0.1:
-                continue
-
-            # Add all activated fragments to the list, even waiting fragments
-            group_fragments[fragment.group].append(fragment)
-
-            # We don't care about any fragments that aren't moving between locations, that is, waiting fragments
-            if (
-                    len(fragment.order_list) == 0
-                    and fragment.departure_location == fragment.arrival_location
-            ):
-                continue
-
-            # Add activated arcs to the list
-            group = fragment.group
-            group_arcs[group].append(fragment.arc)
-            for order in fragment.order_list:
-                group_orders[group].append(order)
-
-        # We have identified all activated fragments
-        # Now we go through each courier group and build a sub-network
         for group in Group.groups:
-            if (group, frozenset(group_orders[group])) in model._solved_subproblems:
-                print(f'Solved {group} on orders {group_orders[group]}, retrieving solution')
-                (objective_value, fragments_for_orders, solution_fragments) = model._solved_subproblems[(group, frozenset(group_orders[group]))]
-                if model.cbGetSolution(payments[group]) < objective_value - 0.001:
-                    print(f'Solution value {model.cbGetSolution(payments[group])}, best possible value {objective_value}')
-                    print('Adding optimality cut, suggesting new solution')
-                    model.cbLazy(payments[group] >= objective_value * (quicksum(fragments[fragment] * len(set(fragment.order_list).intersection(group_orders[group])) for fragment in fragments_for_orders) - len(group_orders[group]) + 1))
-                    group_fragments[group] = solution_fragments
-                    group_payments[group] = objective_value
-                continue
-            print(f'Group: {group}, payment: {group_payments[group]}, orders: {group_orders[group]}')
-            arcs = group_arcs[group]
+            print(f'\nChecking solution for {group} of value {model.cbGetSolution(payment_variables[group])}')
+            # find all assigned orders
+            group_fragments = Fragment.fragments_by_group[group]
+            group_fragments_solutions = model.cbGetSolution(
+                list(fragment_variables[fragment] for fragment in group_fragments))
+            gurobi_solution_group_fragments: Set[Fragment] = set()
+            gurobi_solution_group_orders: Set[Order] = set()
+            gurobi_solution_group_arcs: Set[Arc] = set()
+            gurobi_solution_objective = model.cbGetSolution(payment_variables[group])
+            for i in range(len(group_fragments_solutions)):
+                if group_fragments_solutions[i] > 0.9:
+                    gurobi_solution_group_fragments.add(group_fragments[i])
+                    gurobi_solution_group_arcs.add(group_fragments[i].arc)
+                    for order in group_fragments[i].order_list:
+                        gurobi_solution_group_orders.add(order)
+            print(f'Gurobi assigned orders: {gurobi_solution_group_orders}')
 
-            # If no activated arcs, then subnetwork is trivially feasible and optimal
-            if len(arcs) == 0:
-                continue
-
-            """
-            The following two for loops set up the predecessor and successor dictionaries for later use. These are useful as in order to solve the network, we need to keep track of predecessors and successors within the network.
-
-            For arc pred to be a predecessor of arc succ, then pred must finish at the same location that succ begins, and the courier must be able to arrive at that location before they must leave for succ.
-
-            For arc succ to be a successor of arc pred, then succ must begin at the same location that pred ends, and the courier must have time to finish pred before they have to leave for succ.
-
-            From these definitions, we can see that an arc pred is a predecessor of an arc succ if and only if succ is a successor of pred.
-            """
-            # Dictionaries for storing predecessors and arcs.
-            successors_of_arc = {arc: set() for arc in arcs if arc.arrival_location != arc.group}
-
-            for arc1, arc2 in itertools.combinations(arcs, 2):
-                # Check if arc2 is a successor of arc1
-                if arc1.arrival_location != arc1.group and arc1.arrival_location == arc2.departure_location and arc1.earliest_departure_time + arc1.travel_time <= arc2.latest_departure_time:
-                    # Add arc2 as a successor of arc1
-                    successors_of_arc[arc1].add(arc2)
-                # Check if arc1 is a successor of arc2
-                if arc2.arrival_location != arc2.group and arc2.arrival_location == arc1.departure_location and arc2.earliest_departure_time + arc2.travel_time <= arc1.latest_departure_time:
-                    # Add arc1 as a successor of arc2
-                    successors_of_arc[arc2].add(arc1)
-
-            """
-            The rest of this function deals with the creation and solving of the sub-model. The mathematics of this sub-model are explained in detail in sections 3.1 and 3.2 of the write-up.
-
-            We start off by constructing the variables. We have one variable for courier payments within the group, one variable keeping track of which arcs are used as successors or predecessors, one variable keeping track of when each arc is serviced, and one variable linking arcs with servicing couriers.
-
-            The objective is to minimise the total payment to the couriers within the group.
-
-            Then we have the constraints linking the variables together. Note: the equation numbers given in the code may not be correct.
-            """
-            ipe = Model("Illegal Path Elimination")
-            ipe.setParam("OutputFlag", 0)
-            courier_payments = {courier: ipe.addVar() for courier in group.couriers}
-            successors = {(arc1, arc2): ipe.addVar(vtype=GRB.BINARY) for arc1 in successors_of_arc for arc2 in
-                          successors_of_arc[arc1]}
-            timings = {arc: ipe.addVar() for arc in arcs}
-            assignments = {
-                (courier, arc): ipe.addVar(vtype=GRB.BINARY)
-                for courier in group.couriers
-                for arc in arcs
-            }
-
-            # Minimise cumulative courier payments (eq 8)
-            ipe.setObjective(
-                quicksum(courier_payments[courier] for courier in group.couriers)
-            )
-
-            # Each courier is paid for their time (eq 9)
-            courier_time = {
-                courier: ipe.addConstr(
-                    courier_payments[courier]
-                    >= (courier.off_time - courier.on_time) / 60 * Data.MIN_PAY_PER_HOUR
-                )
-                for courier in group.couriers
-            }
-            # Each courier is paid per delivery (eq 10)
-            courier_deliveries = {
-                courier: ipe.addConstr(
-                    courier_payments[courier]
-                    >= quicksum(
-                        assignments[courier, arc]
-                        * len(arc.order_list)
-                        * Data.PAY_PER_DELIVERY
-                        for arc in arcs
-                    )
-                )
-                for courier in group.couriers
-            }
-            # All activated arcs are assigned to a courier (eq 11)
-            arcs_serviced = {
-                arc: ipe.addConstr(
-                    quicksum(assignments[courier, arc] for courier in group.couriers)
-                    == 1
-                )
-                for arc in arcs
-            }
-            # All non-exit arcs must have a successor (eq 12)
-            have_succ = {arc1: ipe.addConstr(quicksum(successors[arc1, arc2] for arc2 in successors_of_arc[arc1]) == 1)
-                         for arc1 in arcs if arc1.arrival_location != arc1.group}
-            # All successors must start late enough for the previous to finish (eq 15)
-            succ_timings = {
-                (arc1, arc2): ipe.addConstr(
-                    timings[arc1] + arc1.travel_time
-                    <= timings[arc2]
-                    + (1 - successors[arc1, arc2])
-                    * (
-                            arc1.latest_departure_time
-                            + arc1.travel_time
-                            - arc2.earliest_departure_time
-                    )
-                )
-                for (arc1, arc2) in successors
-            }
-            # If a courier services an arc, it must also service its successor (eq 16)
-            cour_serv_succ = {
-                (arc1, arc2, courier): ipe.addConstr(
-                    assignments[courier, arc1] + successors[arc1, arc2] - 1
-                    <= assignments[courier, arc2]
-                )
-                for courier in group.couriers
-                for (arc1, arc2) in successors
-            }
-            # An arc must be serviced after it is ready (eq 13)
-            begin_on_time = {
-                arc: ipe.addConstr(timings[arc] >= arc.earliest_departure_time)
-                for arc in arcs
-            }
-            # An arc must be serviced before it is too late (eq 14)
-            end_on_time = {
-                arc: ipe.addConstr(timings[arc] <= arc.latest_departure_time)
-                for arc in arcs
-            }
-
-            # After constraint generation, solve submodel
-            ipe.optimize()
-
-            if ipe.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
-                # Sub-model is feasible, move to optimality cuts
-                group_payment = ipe.getObjective().getValue()
-                group_payments[group] = group_payment
-                # Equation 17
-                mdrp.cbLazy(payments[group]
-                            >= group_payment * (1
-                                                - len(arcs)
-                                                + quicksum(fragments[fragment]
-                                                           for arc in arcs
-                                                           for fragment in Fragment.fragments_by_arc[arc])))
-                print(f"Added optimality constraint for {group} on arcs")
-                # Add an optimality cut for the group on the orders
-                submodel = UntimedFragmentsMDRP.get_arc_model(group, group_orders[group])
-                if submodel is None:
-                    submodel = ArcModelNoCourierAssignments(group, Arc.get_arcs_with_orders(group_orders[group], group),
-                                                            group_orders[group], cost_penalty_active=True,
-                                                            save_model=True,
-                                                            time_limit=10)
-                    print('Created new model')
+            # check if (group, orders) pair already considered
+            if (group, frozenset(gurobi_solution_group_orders)) in mdrp._solved_subproblems:
+                print(f'Already solved on {(group, gurobi_solution_group_orders)}, comparing with existing solution')
+                # if group objective value too low, add cut and suggest saved solution
+                # if group objective is fine, save existing solution
+                subnetwork = model._solved_subproblems[(group, frozenset(gurobi_solution_group_orders))]
+                best_possible_solution_value = subnetwork.get_best_objective()
+                extra_costs = subnetwork.get_undelivered_orders_cost()
+                if best_possible_solution_value + extra_costs > gurobi_solution_objective + 0.01:
+                    print(f'Found solution too low, adding optimality cut of {best_possible_solution_value}')
+                    add_lazy_optimality_cut_on_orders(model, group, frozenset(gurobi_solution_group_orders),
+                                                      best_possible_solution_value)
+                    saved_solution[group] = (best_possible_solution_value, extra_costs, subnetwork.get_best_fragments())
                 else:
-                    submodel.setParam('TimeLimit', submodel.getParamInfo('TimeLimit')[2] + 10)
-                    print('Retrieving existing model')
-                submodel.optimize()
-                if submodel.getAttr('Status') == GRB.OPTIMAL:
-                    submodel_orders = group_orders[group]
-                    submodel_arcs = Arc.get_arcs_for_orders(group_orders[group], group)
-                    submodel_fragments = Fragment.get_fragments_from_arcs(submodel_arcs)
-                    model.cbLazy(payments[group]
-                                 >= submodel.objVal * (quicksum(fragments[fragment]
-                                                                * len(
-                        set(fragment.order_list).intersection(submodel_orders))
-                                                                for fragment in submodel_fragments)
-                                                       - len(submodel_orders) + 1))
-                    print(
-                        f'Added optimality constraint for {group} on orders {group_orders[group]} of value {submodel.objVal}')
-                    group_fragments[group] = submodel.convert_to_timed_path_fragments()
-                    print(f'Saved solution for {group} of {submodel.objVal} on orders {group_orders[group]}')
-                    print()
-                    model._solved_subproblems[(group, frozenset(group_orders[group]))] = (submodel.objVal, submodel_fragments, group_fragments[group])
-                elif submodel.getAttr('Status') == GRB.TIME_LIMIT:
-                    print(f'Not solved to optimality, adding optimality constraint on arcs')
-                    submodel_arcs = submodel.get_activated_arcs()
-                    submodel_fragments = Fragment.get_fragments_from_arcs(submodel_arcs)
-                    undelivered_orders = submodel.get_undelivered_orders()
-                    objective_value = submodel.objVal - len(undelivered_orders)
-                    model.cbLazy(payments[group] >= objective_value * (
-                                quicksum(fragments[fragment] for fragment in submodel_fragments) - len(
-                            submodel_arcs) + 1))
-                    group_fragments[group] = submodel_fragments
-                    group_payments[group] = objective_value
-                else:
-                    print(f'Status = {submodel.getAttr("Status")}')
+                    print(f'Gurobi solution fine')
+                    saved_solution[group] = (gurobi_solution_objective, 0, gurobi_solution_group_fragments)
 
             else:
-                # Sub-model is infeasible, move to feasibility cuts
-                ipe.computeIIS()
-                infeasible_arcs = set()
-                # Not all groups are feasible
-
-                # Add all infeasible arcs to our collection
-                for arc in have_succ:
-                    if have_succ[arc].IISConstr:
-                        infeasible_arcs.add(arc)
-
-                # Add a feasibility cut (eq 18)
-                # sum(infeasible_arcs) <= num(infeasible_arcs) - 1 + sum(alternative_successors)
-                alternative_successors = list(
-                    succ for succ in Arc.get_succ_to_arcs(infeasible_arcs) if succ not in infeasible_arcs)
-                mdrp.cbLazy(
-                    quicksum(
-                        fragments[fragment]
-                        for arc in infeasible_arcs
-                        for fragment in Fragment.fragments_by_arc[arc]
-                    )
-                    <= len(infeasible_arcs)
-                    - 1
-                    + quicksum(
-                        fragments[fragment]
-                        for succ in alternative_successors
-                        for fragment in Fragment.fragments_by_arc[succ]
-                    )
-                )
-                print(f"Added feasibility cut for {group} on arcs")
-
-                # Add a valid inequality cut
-                if add_valid_inequality_to_callback:
-                    callback_VI_added = 0
-                    for infeasible_arc in infeasible_arcs:
-                        if type(infeasible_arc.departure_location) != Courier:
-                            mdrp.cbLazy(
-                                quicksum(
-                                    fragments[fragment]
-                                    for predecessor in infeasible_arc.get_pred()
-                                    for fragment in Fragment.fragments_by_arc[predecessor]
-                                )
-                                >= quicksum(
-                                    fragments[fragment]
-                                    for fragment in Fragment.fragments_by_arc[infeasible_arc]
-                                )
-                            )
-                            callback_VI_added += 1
-                        if type(infeasible_arc.arrival_location) != Group:
-                            mdrp.cbLazy(
-                                quicksum(
-                                    fragments[fragment]
-                                    for successor in infeasible_arc.get_succ()
-                                    for fragment in Fragment.fragments_by_arc[successor]
-                                )
-                                >= quicksum(
-                                    fragments[fragment]
-                                    for fragment in Fragment.fragments_by_arc[infeasible_arc]
-                                )
-                            )
-                            callback_VI_added += 1
-                    if log_constraint_additions:
-                        print(f"Added {callback_VI_added} valid inequalities.")
-
-                # Create a new solution for the group
-                print(f'Searching for new solution for {group} with orders {group_orders[group]}.')
-                submodel = UntimedFragmentsMDRP.get_arc_model(group, group_orders[group])
-                if submodel is None:
-                    submodel = ArcModelNoCourierAssignments(group, Arc.get_arcs_with_orders(group_orders[group], group),
-                                                            group_orders[group], cost_penalty_active=True,
-                                                            save_model=True,
-                                                            time_limit=10)
-                    print('Created new model')
-                else:
-                    submodel.setParam('TimeLimit', submodel.getParamInfo('TimeLimit')[2] + 10)
-                    print('Retrieving existing model')
-                submodel.optimize()
-                # Only proceed if we have at least one solution
-                if submodel.getAttr('Status') == GRB.OPTIMAL:
-                    print(f'Solution found for {group} on orders {group_orders[group]}')
-                    # Add constraint on orders in the group
-                    undelivered_orders = submodel.get_undelivered_orders()
-                    if len(undelivered_orders) > 0:
-                        # At least one order undelivered, add group feasibility cut on orders
-                        delivered_orders = set(group_orders[group])
-                        for undeliverable_order in undelivered_orders:
-                            delivered_orders.remove(undeliverable_order)
-                        # Add feasibility cut on order combination for group
-                        for undeliverable_order in undelivered_orders:
-                            infeasible_order_set = set(delivered_orders)
-                            infeasible_order_set.add(undeliverable_order)
-                            print(f'Adding feasibility cut for {group} on orders {infeasible_order_set}')
-                            infeasible_arc_set = Arc.get_arcs_for_orders(list(infeasible_order_set), group)
-                            infeasible_fragment_set = Fragment.get_fragments_from_arcs(infeasible_arc_set)
-                            model.cbLazy(quicksum(fragments[fragment]
-                                                  * len(set(fragment.order_list).intersection(infeasible_order_set))
-                                                  for fragment in infeasible_fragment_set)
-                                         <= len(infeasible_order_set) - 1)
-                        group_orders[group] = delivered_orders
-                        group_payments[group] = submodel.objVal - 10000 * len(undelivered_orders)
-                        extra_costs += 10000 * len(undelivered_orders)
+                # Solve UFModel on arcs, and add optimality/feasibility cut if necessary
+                subproblem = UntimedFragmentsMDRP(group, list(gurobi_solution_group_arcs),
+                                                  list(gurobi_solution_group_orders))
+                subproblem.optimize()
+                if subproblem.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
+                    # Add an optimality cut if necessary, else save gurobi's solution
+                    objective_value = subproblem.getAttr(GRB.Attr.ObjVal)
+                    if objective_value > gurobi_solution_objective + 0.01:
+                        # Add an optimality cut
+                        print('Gurobi solution too low, adding optimality cut on arcs')
+                        add_lazy_optimality_cut_on_arcs(model, group, frozenset(gurobi_solution_group_arcs),
+                                                        objective_value)
+                        saved_solution[group] = (objective_value, 0, subproblem.convert_to_timed_path_fragments())
                     else:
-                        group_payments[group] = submodel.objVal
-                        delivered_orders = group_orders[group]
-                    # Add optimality cut on feasible orders
-                    print(f'Adding optimality cut of {submodel.objVal} for {group} on orders {group_orders[group]}')
-                    arcs_for_orders = Arc.get_arcs_for_orders(delivered_orders, group)
-                    # arcs_for_group = Arc.get_arcs_for_group(group)
-                    # fragments_for_group = Fragment.get_fragments_from_arcs(list(arcs_for_group))
-                    fragments_for_orders = Fragment.get_fragments_from_arcs(arcs_for_orders)
-                    model.cbLazy(payments[group]
-                                 >= submodel.objVal
-                                 * (quicksum(fragments[fragment]
-                                             * len(set(fragment.order_list).intersection(delivered_orders))
-                                             for fragment in fragments_for_orders)
-                                    - len(delivered_orders) + 1))
-                    # Suggest a solution to Gurobi
-                    group_fragments[group] = submodel.convert_to_timed_path_fragments()
-                    print(f'Saved solution for {group} of {group_payments[group]} for orders {group_orders[group]}')
-                    model._solved_subproblems[(group, frozenset(group_orders[group]))] = (submodel.objVal, fragments_for_orders, group_fragments[group])
-                    print()
-                elif submodel.getAttr('Status') == GRB.TIME_LIMIT:
-                    print(f'Model not solved to completion, adding an optimality cut on arcs.\n')
-                    undelivered_orders = submodel.get_undelivered_orders()
-                    submodel_arcs = submodel.get_activated_arcs()
-                    objective_value = submodel.objVal - len(undelivered_orders)
-                    # Add optimality cut on activated arcs
-                    activated_fragments = Fragment.get_fragments_from_arcs(list(submodel_arcs))
-                    model.cbLazy(payments[group] >= objective_value * (quicksum(
-                        fragments[fragment] for fragment in activated_fragments) - len(submodel_arcs) + 1))
-                    group_fragments[group] = submodel.convert_to_timed_path_fragments()
-                    group_payments[group] = objective_value
+                        print('Gurobi solution optimal on arcs')
+                        saved_solution[group] = (gurobi_solution_objective, 0, gurobi_solution_group_fragments)
+
                 else:
-                    print(f'Status = {submodel.getAttr("Status")}')
+                    # subproblem infeasible, add feasibility cut
+                    assert subproblem.getAttr(GRB.Attr.Status) == GRB.INFEASIBLE
+                    print('Gurobi solution infeasible, adding feasibility cut on arcs')
+                    add_lazy_feasibility_cut_on_arcs(model, group, frozenset(gurobi_solution_group_arcs))
+                    print(gurobi_solution_group_arcs)
+                    saved_solution[group] = (0, 10000 * len(gurobi_solution_group_orders), set())
 
-        """
-        Suggest our constructed solution to Gurobi.
+                # Solve UFModel on orders, and add optimality/feasibility cut if necessary
+                print(f'Looking for better solutions on orders for {group}')
+                submodel = UntimedFragmentsMDRP.get_arc_model(group, list(gurobi_solution_group_orders))
+                if submodel is None:
+                    group_arcs = Arc.get_arcs_for_orders(list(gurobi_solution_group_orders), group)
+                    submodel = UntimedFragmentsMDRP(group, group_arcs, list(gurobi_solution_group_orders),
+                                                    cost_penalty_active=True, time_limit=10, save_model=True)
+                    print(f'Created new submodel on {gurobi_solution_group_orders}')
+                else:
+                    print(f'Retrieved existing submodel on {gurobi_solution_group_orders}')
+                    submodel.setParam('TimeLimit', submodel.getParamInfo('TimeLimit')[2] + 10)
+                submodel.optimize()
 
-        If all groups are feasible, then we simply suggest the fragments that were activated at the beginning of the callback. If at least one group was infeasible, then we replace the fragments for that group with our new fragments.
-        """
-        # Calculate new solution value
-        if suggest_solution:
-            solution_value = 0
+                # Add feasibility cuts if necessary
+                undelivered_orders = submodel.get_undelivered_orders()
+                delivered_orders = set(gurobi_solution_group_orders)
+                delivered_orders -= set(undelivered_orders)
+                if len(undelivered_orders) > 0:
+                    print(f'Not all orders deliverable, cannot deliver {undelivered_orders}')
+                    # Add feasibility cut on all undelivered orders
+                    add_lazy_feasibility_cut_on_orders(model, group, delivered_orders, set(undelivered_orders))
+
+                # Suggest found solution
+                extra_costs = 10000 * len(undelivered_orders)
+                objective_value = submodel.getAttr(GRB.Attr.ObjVal) - extra_costs
+                solution_fragments = submodel.convert_to_timed_path_fragments()
+                if objective_value + extra_costs + 0.01 < saved_solution[group][0] + saved_solution[group][1]:
+                    print(f'Found solution of {objective_value + extra_costs}, suggesting new solution')
+                    saved_solution[group] = (objective_value, extra_costs, solution_fragments)
+
+                """
+                Can I get to the point where I need to add an optimality cut?
+                An optimality cut should only be added if the best solution is 
+                of greater value than the current solution. Currently we know 
+                that we have a valid solution, and the value for that. So by
+                definition, the best solution has a value of less than or equal
+                to the currently known solution. 
+                Having said that, if the Gurobi solution is infeasible, I just
+                don't deliver any orders, and any solution I find that delivers 
+                orders is better.
+                """
+
+                # If optimal, save solution as optimal, add cut on orders if necessary
+                if submodel.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
+                    print(f'Solved submodel to optimality with solution of {objective_value}')
+                    mdrp._solved_subproblems[(group, frozenset(gurobi_solution_group_orders))] \
+                        = SubNetwork(group, frozenset(gurobi_solution_group_orders), objective_value, extra_costs,
+                                     set(solution_fragments))
+                    print(f'Added optimality cut on orders of value {objective_value}')
+                    add_lazy_optimality_cut_on_orders(model, group, delivered_orders, objective_value)
+                else:
+                    print(f'Added optimality cut on fragments of value {objective_value}')
+                    add_lazy_optimality_cut_on_fragments(model, group, solution_fragments, objective_value)
+
+        # Check to see if saved solution better than current best solution
+        total_solution_value = 0
+        for group in Group.groups:
+            total_solution_value += saved_solution[group][0] + saved_solution[group][1]
+        for order in Order.orders:
+            if model.cbGetSolution(order_variables[order]) < 0.1:
+                total_solution_value += 10000
+        if total_solution_value + 0.01 < mdrp._best_solution_value:
+            print(f'New solution of {total_solution_value} best found so far')
+            mdrp._best_solution_value = total_solution_value
+            mdrp._best_solution_fragments = set()
             for group in Group.groups:
-                solution_value += group_payments[group]
-            for order in orders:
-                if mdrp.cbGetSolution(orders[order]) < 0.1:
-                    solution_value += 10000
-            solution_value += extra_costs
-            # Compare to previous solution value
-            if solution_value + 0.0001 < mdrp._best_solution_value:
-                # Save activated fragments and delivered orders to suggest later
-                mdrp._best_fragments = list()
-                for group in group_fragments:
-                    mdrp._best_fragments += group_fragments[group]
-                mdrp._best_solution_value = solution_value
-                if log_find_and_suggest_solutions:
-                    print(
-                        f"Saved solution of value {solution_value} to suggest later"
-                    )
-            elif log_find_and_suggest_solutions:
-                print(f"Found solution of {solution_value} worse than current best solution")
+                mdrp._best_solution_fragments = mdrp._best_solution_fragments.union(saved_solution[group][2])
+            mdrp._best_solution_group_values = {group: saved_solution[group][0] for group in Group.groups}
         else:
-            if log_find_and_suggest_solutions:
-                print()
-        print('--------------------------------------------------')
+            print(f'New solution of {total_solution_value} not best solution')
+        print('-' * 50)
 
-    """
-    In the MIPNODE stage of solving the problem, we can suggest previous
-    solutions that we have found. We check that our suggested solution is
-    better than the currently best found solution, and then suggest it to
-    Gurobi to implement into the path.
-    """
-    if (
-            where == GRB.Callback.MIPNODE
-            and mdrp._best_solution_value + 0.0001 < mdrp.cbGet(GRB.Callback.MIPNODE_OBJBST)
-    ):
-        # Give Gurobi values for all fragments according to our solution
-        activated_fragment_variables = list()
-        non_activated_fragment_variables = list()
-        for fragment in fragments:
-            if fragment in mdrp._best_fragments:
-                activated_fragment_variables.append(fragments[fragment])
-            else:
-                non_activated_fragment_variables.append(fragments[fragment])
-        mdrp.cbSetSolution(activated_fragment_variables, list(1 for _ in range(len(activated_fragment_variables))))
-        mdrp.cbSetSolution(non_activated_fragment_variables,
-                           list(0 for _ in range(len(non_activated_fragment_variables))))
-        objVal = mdrp.cbUseSolution()
-        if log_find_and_suggest_solutions:
-            print(f'Suggested value of {mdrp._best_solution_value}, Gurobi found {objVal}')
-            print('Activated fragments are:')
-            for fragment in mdrp._best_fragments:
-                print(fragment)
-            print()
+    # Suggest saved solution to gurobi
+    if where == GRB.Callback.MIPNODE:
+        if mdrp._best_solution_value + 0.01 < model.cbGet(GRB.Callback.MIPNODE_OBJBST):
+            print(f'\nSuggesting solution of {mdrp._best_solution_value} to Gurobi')
+            activated_fragments = mdrp._best_solution_fragments
+            deactivated_fragments = set(Fragment.fragments) - activated_fragments
+            model.cbSetSolution(list(fragment_variables[fragment] for fragment in activated_fragments),
+                                list(1 for _ in range(len(activated_fragments))))
+            model.cbSetSolution(list(fragment_variables[fragment] for fragment in deactivated_fragments),
+                                list(0 for _ in range(len(deactivated_fragments))))
+            model.cbSetSolution(list(payment_variables[group] for group in mdrp._best_solution_group_values),
+                                list(mdrp._best_solution_group_values[group] for group in
+                                     mdrp._best_solution_group_values))
+            objVal = model.cbUseSolution()
+            print(f'Gurobi found objective of {objVal}')
 
 
 # mdrp.setParam('TuneTimeLimit', 36000)
 # mdrp.tune()
-mdrp.optimize(Callback)
+mdrp.optimize(callback)
 print(f"\nProgram finished running at t = {get_program_run_time()}")
+
 
 
 def orders_per_courier():
@@ -1187,7 +964,7 @@ def orders_per_courier():
     """
     orders_per_courier = {courier: set() for courier in Courier.couriers}
     for fragment in Fragment.fragments:
-        if fragments[fragment].x > 0.9:
+        if fragment_variables[fragment].x > 0.9:
             courier = fragment.courier
             for order in fragment.order_list:
                 orders_per_courier[courier].add(order)

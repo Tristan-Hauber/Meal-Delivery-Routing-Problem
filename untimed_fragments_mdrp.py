@@ -14,6 +14,7 @@ from typing import List, Set
 
 import time
 import math
+import itertools
 
 
 class UntimedFragmentsMDRP(Model):
@@ -89,14 +90,13 @@ class UntimedFragmentsMDRP(Model):
         # Arc2 follows arc1
         self._successors = {
             (arc1, arc2): self.addVar(vtype=GRB.BINARY)
-            for arc1 in arcs
-            for arc2 in arcs
-            if arc2 != arc1
-            and arc1.arrival_location == arc2.departure_location
-            and arc1.earliest_departure_time + arc1.travel_time <= arc2.latest_departure_time
+            for arc1 in self._arcs
+            for arc2 in self._arcs
+            if arc1.arrival_location == arc2.departure_location
+            # and arc1.earliest_departure_time + arc1.travel_time <= arc2.latest_departure_time
         }
         self.update()
-        print(f'{self.getAttr(GRB.Attr.NumVars)} variables created, t={math.ceil(time.time() - self._model_initiation)}')
+        # print(f'{self.getAttr(GRB.Attr.NumVars)} variables created, t={math.ceil(time.time() - self._model_initiation)}')
 
         """ ========== OBJECTIVE ========== """
         self.setObjective(
@@ -234,7 +234,7 @@ class UntimedFragmentsMDRP(Model):
             quicksum(self._serviced[arc] for arc in self._arcs if type(arc.departure_location) == Courier)
             == quicksum(self._serviced[arc] for arc in self._arcs if type(arc.arrival_location) == Group))
         self.update()
-        print(f'{self.getAttr(GRB.Attr.NumConstrs)} constraints created, t={math.ceil(time.time() - self._model_initiation)}')
+        # print(f'{self.getAttr(GRB.Attr.NumConstrs)} constraints created, t={math.ceil(time.time() - self._model_initiation)}')
         """ ========== Attributes ========== """
         self._paths = None
 
@@ -279,21 +279,24 @@ class UntimedFragmentsMDRP(Model):
             path.append(activated_starting_untimed_path_fragments.pop())
             # Follow it to the end
             while True:
-                found_following_fragment = False
                 for transition in activated_transitions:
                     if transition[0] == path[-1]:
                         new_untimed_path_fragment = transition[1]
                         path.append(new_untimed_path_fragment)
                         activated_untimed_path_fragments.remove(new_untimed_path_fragment)
                         activated_transitions.remove(transition)
-                        found_following_fragment = True
                         break
+                else:
+                    assert False # No new path step found
                 if type(path[-1].arrival_location) == Group:
                     break
-                assert found_following_fragment
             untimed_fragment_path = UntimedFragmentPath(path)
             self._paths.append(untimed_fragment_path)
+        if len(activated_transitions) > 0:
+            assert False
         assert len(activated_transitions) == 0
+        if len(activated_untimed_path_fragments) > 0:
+            assert False
         assert len(activated_untimed_path_fragments) == 0
         return self._paths
 
@@ -324,7 +327,7 @@ class UntimedFragmentsMDRP(Model):
 
     def optimize(self):
         super().optimize()
-        print(f'Optimisation complete, t={math.ceil(time.time() - self._model_initiation)}')
+        # print(f'Optimisation complete, t={math.ceil(time.time() - self._model_initiation)}')
 
     def get_activated_arcs(self) -> Set[Arc]:
         """Return a set of all activated arcs"""
