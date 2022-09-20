@@ -731,14 +731,21 @@ def add_lazy_optimality_cut_on_fragments(model: Model, group: Group, fragments: 
                     quicksum(fragment_variables[fragment] for fragment in fragments) - len(fragments) + 1))
 
 
-def add_lazy_feasibility_cut_on_arcs(model: Model, group: Group, arcs: FrozenSet[Arc]) -> None:
-    """Add a lazy feasibility cut on the given arcs, for the given model."""
-    fragments_for_cut = set(Fragment.get_fragments_from_arcs(list(arcs)))
-    alternative_fragments = set(Fragment.fragments_by_group[group]) - fragments_for_cut
-    model.cbLazy(quicksum(fragment_variables[fragment] for fragment in fragments_for_cut)
-                 <= len(fragments_for_cut) - 1 + quicksum(
-        fragment_variables[fragment] for fragment in alternative_fragments))
+def add_lazy_feasibility_predecessor_cut_on_arcs(model: Model, infeasible_arcs: Set[Arc], activated_arcs: Set[Arc]) -> None:
+    """
+    Add a lazy feasibility cut on the given infeasible_arcs, for the given model.
 
+    The sum of the infeasible infeasible_arcs must be less than or equal to the number of
+    infeasible infeasible_arcs minus 1, plus the sum of currently non-activated, alternative
+    predecessors.
+    """
+    fragments_for_cut = set(Fragment.get_fragments_from_arcs(list(infeasible_arcs)))
+    arc_predecessors = Arc.get_pred_to_arcs(infeasible_arcs)
+    alternative_predecessors = set(arc_predecessors) - activated_arcs
+    alternative_fragments = Fragment.get_fragments_from_arcs(list(alternative_predecessors))
+    model.cbLazy(quicksum(fragment_variables[fragment] for fragment in fragments_for_cut)
+                 <= len(fragments_for_cut) - 1
+                 + quicksum(fragment_variables[fragment] for fragment in alternative_fragments))
 
 def add_lazy_feasibility_cut_on_orders(model: Model, group: Group, feasible_orders: Set[Order],
                                        infeasible_orders: Set[Order]) -> None:
@@ -852,8 +859,8 @@ def callback(model: Model, where: int) -> None:
                     # subproblem infeasible, add feasibility cut
                     assert subproblem.getAttr(GRB.Attr.Status) == GRB.INFEASIBLE
                     print('Gurobi solution infeasible, adding feasibility cut on arcs')
-                    add_lazy_feasibility_cut_on_arcs(model, group, frozenset(gurobi_solution_group_arcs))
-                    print(gurobi_solution_group_arcs)
+                    infeasible_arcs = subproblem.get_infeasible_arcs()
+                    add_lazy_feasibility_predecessor_cut_on_arcs(model, set(infeasible_arcs), gurobi_solution_group_arcs)
                     saved_solution[group] = (0, 10000 * len(gurobi_solution_group_orders), set())
 
                 # Solve UFModel on orders, and add optimality/feasibility cut if necessary
@@ -869,11 +876,18 @@ def callback(model: Model, where: int) -> None:
                     submodel.setParam('TimeLimit', submodel.getParamInfo('TimeLimit')[2] + 10)
                 submodel.optimize()
 
+                if submodel.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
+                    print('Found optimal solution on group')
+                elif submodel.getAttr(GRB.Attr.Status) == GRB.TIME_LIMIT:
+                    print('Time limit reached')
+                else:
+                    print(f'Status = {submodel.getAttr(GRB.Attr.Status)}')
+
                 # Add feasibility cuts if necessary
                 undelivered_orders = submodel.get_undelivered_orders()
                 delivered_orders = set(gurobi_solution_group_orders)
                 delivered_orders -= set(undelivered_orders)
-                if len(undelivered_orders) > 0:
+                if len(undelivered_orders) > 0 and submodel.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
                     print(f'Not all orders deliverable, cannot deliver {undelivered_orders}')
                     # Add feasibility cut on all undelivered orders
                     add_lazy_feasibility_cut_on_orders(model, group, delivered_orders, set(undelivered_orders))
@@ -886,29 +900,32 @@ def callback(model: Model, where: int) -> None:
                     print(f'Found solution of {objective_value + extra_costs}, suggesting new solution')
                     saved_solution[group] = (objective_value, extra_costs, solution_fragments)
 
-                """
-                Can I get to the point where I need to add an optimality cut?
-                An optimality cut should only be added if the best solution is 
-                of greater value than the current solution. Currently we know 
-                that we have a valid solution, and the value for that. So by
-                definition, the best solution has a value of less than or equal
-                to the currently known solution. 
-                Having said that, if the Gurobi solution is infeasible, I just
-                don't deliver any orders, and any solution I find that delivers 
-                orders is better.
-                """
+                    """
+                    Can I get to the point where I need to add an optimality cut?
+                    An optimality cut should only be added if the best solution is 
+                    of greater value than the current solution. Currently we know 
+                    that we have a valid solution, and the value for that. So by
+                    definition, the best solution has a value of less than or equal
+                    to the currently known solution. 
+                    Having said that, if the Gurobi solution is infeasible, I just
+                    don't deliver any orders, and any solution I find that delivers 
+                    orders is better.
+                    """
 
-                # If optimal, save solution as optimal, add cut on orders if necessary
+                    # Add cut on orders if necessary
+                    if submodel.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
+                        print(f'Added optimality cut on orders of value {objective_value}')
+                        add_lazy_optimality_cut_on_orders(model, group, delivered_orders, objective_value)
+                    else:
+                        print(f'Added optimality cut on fragments of value {objective_value}')
+                        add_lazy_optimality_cut_on_fragments(model, group, solution_fragments, objective_value)
+
+                # Solved to optimality, save submodel
                 if submodel.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
                     print(f'Solved submodel to optimality with solution of {objective_value}')
                     mdrp._solved_subproblems[(group, frozenset(gurobi_solution_group_orders))] \
                         = SubNetwork(group, frozenset(gurobi_solution_group_orders), objective_value, extra_costs,
                                      set(solution_fragments))
-                    print(f'Added optimality cut on orders of value {objective_value}')
-                    add_lazy_optimality_cut_on_orders(model, group, delivered_orders, objective_value)
-                else:
-                    print(f'Added optimality cut on fragments of value {objective_value}')
-                    add_lazy_optimality_cut_on_fragments(model, group, solution_fragments, objective_value)
 
         # Check to see if saved solution better than current best solution
         total_solution_value = 0
@@ -943,6 +960,9 @@ def callback(model: Model, where: int) -> None:
                                      mdrp._best_solution_group_values))
             objVal = model.cbUseSolution()
             print(f'Gurobi found objective of {objVal}')
+            if objVal > mdrp._best_solution_value + 0.01:
+                for fragment in activated_fragments:
+                    print(fragment)
 
 
 # mdrp.setParam('TuneTimeLimit', 36000)

@@ -319,10 +319,11 @@ class UntimedFragmentsMDRP(Model):
 
     def get_infeasible_arcs(self) -> List[Arc]:
         """Return all arcs involved in the IIS."""
+        self.computeIIS()
         infeasible_arcs = list()
-        for arc in self._has_predecessor:
-            if self._has_predecessor[arc].IISConstr:
-                infeasible_arcs.append(arc)
+        for (arc1, arc2) in self._successor_timings:
+            if self._successor_timings[(arc1, arc2)].IISConstr:
+                infeasible_arcs.append(arc2)
         return infeasible_arcs
 
     def optimize(self):
