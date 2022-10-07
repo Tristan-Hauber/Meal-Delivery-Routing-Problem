@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from gurobipy import Model, quicksum, GRB
 from classes import Group, Arc, Data, Order, UntimedFragmentPath, Courier, Fragment
-from typing import List, Set
+from typing import List, Set, Dict
 
 import time
 import math
@@ -70,6 +70,46 @@ class UntimedFragmentsMDRP(Model):
         self._couriers = group.couriers
         self._arcs = arcs
         self._orders = orders
+        """ ========== OPTIMISATION ========== """
+        self._couriers_for_arc: Dict[Arc: Set[Courier]] = {arc: set() for arc in self._arcs}
+        self._arcs_for_courier: Dict[Courier: Set[Arc]] = {courier: set() for courier in self._couriers}
+        self._entry_arcs_for_courier: Dict[Courier: Set[Arc]] = {courier: set() for courier in self._couriers}
+        self._arcs_for_order: Dict[Order: Set[Arc]] = {order: set() for order in self._orders}
+        self._successors_of_arc: Dict[Arc: Set[Arc]] = {arc: set() for arc in self._arcs if type(arc.arrival_location) != Group}
+        self._predecessors_of_arc: Dict[Arc: Set[Arc]] = {arc: set() for arc in self._arcs if type(arc.departure_location) != Courier}
+        self._entry_arcs: Set[Arc] = set()
+        self._exit_arcs: Set[Arc] = set()
+        # Find possible servicing couriers for the arc
+        for arc in self._arcs:
+            if type(arc.departure_location) == Courier:
+                self._couriers_for_arc[arc].add(arc.departure_location)
+                self._arcs_for_courier[arc.departure_location].add(arc)
+                self._entry_arcs_for_courier[arc.departure_location].add(arc)
+                self._entry_arcs.add(arc)
+            else:
+                for courier in self._couriers:
+                    if courier.get_earliest_arrival_at(arc.departure_location) <= arc.latest_departure_time:
+                        self._couriers_for_arc[arc].add(courier)
+                        self._arcs_for_courier[courier].add(arc)
+
+                if type(arc.arrival_location) == Group:
+                    self._exit_arcs.add(arc)
+
+            # Find orders serviced by the arc
+            for order in arc.order_list:
+                self._arcs_for_order[order].add(arc)
+
+        # Find possible pred-succ pairs
+        for (arc1, arc2) in itertools.combinations(self._arcs, 2):
+            if set(arc1.order_list).intersection(arc2.order_list) == set():
+                if arc1.arrival_location == arc2.departure_location \
+                        and arc1.earliest_departure_time + arc1.travel_time <= arc2.latest_departure_time:
+                    self._successors_of_arc[arc1].add(arc2)
+                    self._predecessors_of_arc[arc2].add(arc1)
+                if arc2.arrival_location == arc1.departure_location \
+                        and arc2.earliest_departure_time + arc2.travel_time <= arc1.latest_departure_time:
+                    self._successors_of_arc[arc2].add(arc1)
+                    self._predecessors_of_arc[arc1].add(arc2)
         """ ========== VARIABLES ========== """
         # Payment to each courier
         self._courier_payments = {courier: self.addVar() for courier in self._couriers}
@@ -85,18 +125,16 @@ class UntimedFragmentsMDRP(Model):
         self._assignments = {
             (courier, arc): self.addVar(vtype=GRB.BINARY)
             for courier in self._couriers
-            for arc in self._arcs
+            for arc in self._arcs_for_courier[courier]
         }
         # Arc2 follows arc1
         self._successors = {
             (arc1, arc2): self.addVar(vtype=GRB.BINARY)
-            for arc1 in self._arcs
-            for arc2 in self._arcs
-            if arc1.arrival_location == arc2.departure_location
-            # and arc1.earliest_departure_time + arc1.travel_time <= arc2.latest_departure_time
+            for arc1 in self._successors_of_arc
+            for arc2 in self._successors_of_arc[arc1]
         }
         self.update()
-        # print(f'{self.getAttr(GRB.Attr.NumVars)} variables created, t={math.ceil(time.time() - self._model_initiation)}')
+        print(f'{self.getAttr(GRB.Attr.NumVars)} variables created, t={math.ceil(time.time() - self._model_initiation)}')
 
         """ ========== OBJECTIVE ========== """
         self.setObjective(
@@ -115,7 +153,7 @@ class UntimedFragmentsMDRP(Model):
                     self._assignments[courier, arc]
                     * len(arc.order_list)
                     * Data.PAY_PER_DELIVERY
-                    for arc in self._arcs
+                    for arc in self._arcs_for_courier[courier]
                 )
             )
             for courier in self._couriers
@@ -139,7 +177,7 @@ class UntimedFragmentsMDRP(Model):
             order: self.addConstr(
                 self._deliveries[order]
                 == quicksum(
-                    self._serviced[arc] for arc in self._arcs if order in arc.order_list
+                    self._serviced[arc] for arc in self._arcs_for_order[order]
                 )
             )
             for order in self._orders
@@ -150,36 +188,27 @@ class UntimedFragmentsMDRP(Model):
                 self._serviced[arc]
                 == quicksum(
                     self._assignments[courier, arc]
-                    for courier in self._couriers
-                    if (courier, arc) in self._assignments
+                    for courier in self._couriers_for_arc[arc]
                 )
             )
             for arc in self._arcs
         }
-        # Predecessor and successor setup
-        predecessors = set()
-        successors = set()
-        for (arc1, arc2) in self._successors:
-            predecessors.add(arc1)
-            successors.add(arc2)
         # All activated non-exit arcs must have a successor
         self._has_successor = {
             arc1: self.addConstr(
                 self._serviced[arc1]
                 == quicksum(
                     self._successors[arc1, arc2]
-                    for arc2 in arcs
-                    if (arc1, arc2) in self._successors
+                    for arc2 in self._successors_of_arc[arc1]
                 )
             )
-            for arc1 in predecessors
+            for arc1 in self._successors_of_arc
         }
         # All activated non-entry arcs must have a predecessor
         self._has_predecessor = {
             arc2: self.addConstr(
                 self._serviced[arc2] == quicksum(
-                    self._successors[arc1, arc2] for arc1 in arcs if (arc1, arc2) in self._successors)) for arc2 in
-            successors}
+                    self._successors[arc1, arc2] for arc1 in self._predecessors_of_arc[arc2])) for arc2 in self._predecessors_of_arc}
         # All successors must start late enough for the previous to finish
         self._successor_timings = {
             (arc1, arc2): self.addConstr(
@@ -200,16 +229,8 @@ class UntimedFragmentsMDRP(Model):
                 self._assignments[courier, arc1] + self._successors[arc1, arc2] - 1
                 <= self._assignments[courier, arc2]
             )
-            for courier in self._couriers
             for (arc1, arc2) in self._successors
-        }
-        # If an arc is serviced, it must have a courier servicing it
-        self._servicing_requires_courier = {
-            arc: self.addConstr(
-                self._serviced[arc]
-                == quicksum(self._assignments[courier, arc] for courier in self._couriers)
-            )
-            for arc in self._arcs
+            for courier in self._couriers_for_arc[arc1]
         }
         # An arc must be serviced after it is ready
         self._begin_on_time = {
@@ -224,17 +245,16 @@ class UntimedFragmentsMDRP(Model):
         # A courier may not service more than one entry arc
         self._start_once = {courier: self.addConstr(
             quicksum(
-                self._serviced[arc]
-                for arc in self._serviced
-                if arc.departure_location == courier)
+                self._assignments[courier, arc]
+                for arc in self._entry_arcs_for_courier[courier])
             <= 1)
             for courier in self._couriers}
         # There must be as many exit arcs as entry arcs
         self._in_equals_out = self.addConstr(
-            quicksum(self._serviced[arc] for arc in self._arcs if type(arc.departure_location) == Courier)
-            == quicksum(self._serviced[arc] for arc in self._arcs if type(arc.arrival_location) == Group))
+            quicksum(self._serviced[arc] for arc in self._entry_arcs)
+            == quicksum(self._serviced[arc] for arc in self._exit_arcs))
         self.update()
-        # print(f'{self.getAttr(GRB.Attr.NumConstrs)} constraints created, t={math.ceil(time.time() - self._model_initiation)}')
+        print(f'{self.getAttr(GRB.Attr.NumConstrs)} constraints created, t={math.ceil(time.time() - self._model_initiation)}')
         """ ========== Attributes ========== """
         self._paths = None
 
@@ -273,6 +293,8 @@ class UntimedFragmentsMDRP(Model):
             if self._successors[transition].x > 0.9:
                 activated_transitions.add(transition)
         self._paths = list()
+        if self._group == Group.groups[4]:
+            pass
         # Get a path start
         while len(activated_starting_untimed_path_fragments) > 0:
             path = list()

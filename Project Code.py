@@ -224,7 +224,7 @@ from classes import (
     Node,
     Fragment,
 )
-from typing import Set, Dict, Tuple, FrozenSet
+from typing import Set, Dict, Tuple, FrozenSet, List
 from network import SubNetwork
 from untimed_fragments_mdrp import UntimedFragmentsMDRP, ArcModelNoCourierAssignments
 
@@ -270,7 +270,7 @@ add_valid_inequality_to_callback = True
 suggest_and_repair_solutions = True
 
 # Output
-summary_output = True
+summary_output = False
 log_find_and_suggest_solutions = True
 log_constraint_additions = True
 
@@ -693,7 +693,7 @@ if add_valid_inequality_after_LP:
 # mdrp.addConstr(quicksum(rcList) == 0)
 
 for fragment in fragment_variables:
-    fragment_variables[fragment].vtype = GRB.BINARY
+    fragment_variables[fragment].vtype = GRB.INTEGER
 for order in order_variables:
     order_variables[order].vtype = GRB.BINARY
 for courier in courier_variables:
@@ -872,8 +872,11 @@ def callback(model: Model, where: int) -> None:
                     assert subproblem.getAttr(GRB.Attr.Status) == GRB.INFEASIBLE
                     if not summary_output:
                         print('Gurobi solution infeasible, adding feasibility cut on arcs')
-                    infeasible_arcs = subproblem.get_infeasible_arcs()
-                    add_lazy_feasibility_predecessor_cut_on_arcs(model, set(infeasible_arcs), gurobi_solution_group_arcs)
+                    infeasible_arcs = subproblem._arcs
+                    model.cbLazy(quicksum(fragment_variables[fragment] for arc in infeasible_arcs for fragment in Fragment.fragments_by_arc[arc])
+                                 <= len(infeasible_arcs) - 1)
+                    # infeasible_arcs = subproblem.get_infeasible_arcs()
+                    # add_lazy_feasibility_predecessor_cut_on_arcs(model, set(infeasible_arcs), gurobi_solution_group_arcs)
                     saved_solution[group] = (0, 10000 * len(gurobi_solution_group_orders), set())
 
                 # Solve UFModel on orders, and add optimality/feasibility cut if necessary
@@ -881,7 +884,7 @@ def callback(model: Model, where: int) -> None:
                     print(f'Looking for better solutions on orders for {group}')
                 submodel = UntimedFragmentsMDRP.get_arc_model(group, list(gurobi_solution_group_orders))
                 if submodel is None:
-                    group_arcs = Arc.get_arcs_for_orders(list(gurobi_solution_group_orders), group)
+                    group_arcs = Arc.get_arcs_with_orders(list(gurobi_solution_group_orders), group)
                     submodel = UntimedFragmentsMDRP(group, group_arcs, list(gurobi_solution_group_orders),
                                                     cost_penalty_active=True, time_limit=10, save_model=True)
                     if not summary_output:
@@ -899,6 +902,12 @@ def callback(model: Model, where: int) -> None:
                         print('Time limit reached')
                     else:
                         print(f'Status = {submodel.getAttr(GRB.Attr.Status)}')
+
+                no_of_solutions = submodel.getAttr(GRB.Attr.SolCount)
+                if not summary_output:
+                    print(f'Found {no_of_solutions} solutions')
+                if no_of_solutions == 0:
+                    continue
 
                 # Add feasibility cuts if necessary
                 undelivered_orders = submodel.get_undelivered_orders()
@@ -962,9 +971,9 @@ def callback(model: Model, where: int) -> None:
             if not summary_output:
                 print(f'New solution of {total_solution_value} best found so far')
             mdrp._best_solution_value = total_solution_value
-            mdrp._best_solution_fragments = set()
+            mdrp._best_solution_fragments: List[Fragment] = list()
             for group in Group.groups:
-                mdrp._best_solution_fragments = mdrp._best_solution_fragments.union(saved_solution[group][2])
+                mdrp._best_solution_fragments += saved_solution[group][2]
             mdrp._best_solution_group_values = {group: saved_solution[group][0] for group in Group.groups}
         else:
             if not summary_output:
@@ -972,17 +981,17 @@ def callback(model: Model, where: int) -> None:
         if not summary_output:
             print('-' * 50)
         if summary_output:
-            print(get_program_run_time(), summary_string)
+            print(f't = {get_program_run_time()}, {summary_string}')
 
     # Suggest saved solution to gurobi
     if where == GRB.Callback.MIPNODE:
         if mdrp._best_solution_value + 0.01 < model.cbGet(GRB.Callback.MIPNODE_OBJBST):
             if not summary_output:
                 print(f'\nSuggesting solution of {mdrp._best_solution_value} to Gurobi')
-            activated_fragments = mdrp._best_solution_fragments
+            activated_fragments = set(mdrp._best_solution_fragments)
             deactivated_fragments = set(Fragment.fragments) - activated_fragments
             model.cbSetSolution(list(fragment_variables[fragment] for fragment in activated_fragments),
-                                list(1 for _ in range(len(activated_fragments))))
+                                list(mdrp._best_solution_fragments.count(fragment) for fragment in activated_fragments))
             model.cbSetSolution(list(fragment_variables[fragment] for fragment in deactivated_fragments),
                                 list(0 for _ in range(len(deactivated_fragments))))
             model.cbSetSolution(list(payment_variables[group] for group in mdrp._best_solution_group_values),
