@@ -38,7 +38,7 @@ class UntimedFragmentsMDRP(Model):
 
     def __init__(self, group: Group, arcs: List[Arc], orders: List[Order], cost_penalty: int = 10000,
                  cost_penalty_active: bool = False, time_limit: int = GRB.INFINITY, gap: int = 1e-10,
-                 save_model: bool = False, *args: object, **kwargs: object) -> None:
+                 save_model: bool = False, output_type: str = "Summary", *args: object, **kwargs: object) -> None:
         """
         Create a new meal delivery routing problem model.
 
@@ -133,8 +133,9 @@ class UntimedFragmentsMDRP(Model):
             for arc1 in self._successors_of_arc
             for arc2 in self._successors_of_arc[arc1]
         }
-        self.update()
-        print(f'{self.getAttr(GRB.Attr.NumVars)} variables created, t={math.ceil(time.time() - self._model_initiation)}')
+        if output_type == "Model Size":
+            self.update()
+            print(f'{self.getAttr(GRB.Attr.NumVars)} variables created, t={math.ceil(time.time() - self._model_initiation)}')
 
         """ ========== OBJECTIVE ========== """
         self.setObjective(
@@ -253,8 +254,9 @@ class UntimedFragmentsMDRP(Model):
         self._in_equals_out = self.addConstr(
             quicksum(self._serviced[arc] for arc in self._entry_arcs)
             == quicksum(self._serviced[arc] for arc in self._exit_arcs))
-        self.update()
-        print(f'{self.getAttr(GRB.Attr.NumConstrs)} constraints created, t={math.ceil(time.time() - self._model_initiation)}')
+        if output_type == "Model Size":
+            self.update()
+            print(f'{self.getAttr(GRB.Attr.NumConstrs)} constraints created, t={math.ceil(time.time() - self._model_initiation)}')
         """ ========== Attributes ========== """
         self._paths = None
 

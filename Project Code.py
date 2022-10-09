@@ -270,7 +270,7 @@ add_valid_inequality_to_callback = True
 suggest_and_repair_solutions = True
 
 # Output
-summary_output = False
+summary_output = True
 log_find_and_suggest_solutions = True
 log_constraint_additions = True
 
@@ -800,7 +800,14 @@ def callback(model: Model, where: int) -> None:
         suggest all group totals
     """
     if where == GRB.Callback.MIPSOL:
-        summary_string = f'{model.cbGet(GRB.Callback.MIPSOL_OBJ)} -> '
+        if suggest_and_repair_solutions:
+            calculate_solutions = True
+        else:
+            calculate_solutions = False
+        gurobi_model_objective = model.cbGet(GRB.Callback.MIPSOL_OBJ)
+        if gurobi_model_objective > model._best_solution_value + 0.01:
+            calculate_solutions = False
+        summary_string = f'{gurobi_model_objective} -> '
         if not summary_output:
             print('-' * 50)
             print(f'Checking found solution of value {model.cbGet(GRB.Callback.MIPSOL_OBJ)}')
@@ -878,6 +885,9 @@ def callback(model: Model, where: int) -> None:
                     # infeasible_arcs = subproblem.get_infeasible_arcs()
                     # add_lazy_feasibility_predecessor_cut_on_arcs(model, set(infeasible_arcs), gurobi_solution_group_arcs)
                     saved_solution[group] = (0, 10000 * len(gurobi_solution_group_orders), set())
+
+                if not calculate_solutions:
+                    continue
 
                 # Solve UFModel on orders, and add optimality/feasibility cut if necessary
                 if not summary_output:
@@ -957,29 +967,31 @@ def callback(model: Model, where: int) -> None:
                     mdrp._solved_subproblems[(group, frozenset(gurobi_solution_group_orders))] \
                         = SubNetwork(group, frozenset(gurobi_solution_group_orders), objective_value, extra_costs,
                                      set(solution_fragments))
-
-        # Check to see if saved solution better than current best solution
-        total_solution_value = 0
-        for group in Group.groups:
-            total_solution_value += saved_solution[group][0] + saved_solution[group][1]
-        for order in Order.orders:
-            if model.cbGetSolution(order_variables[order]) < 0.1:
-                total_solution_value += 10000
-        summary_string += f'{total_solution_value}'
-        if total_solution_value + 0.01 < mdrp._best_solution_value:
-            summary_string += ' (saved)'
-            if not summary_output:
-                print(f'New solution of {total_solution_value} best found so far')
-            mdrp._best_solution_value = total_solution_value
-            mdrp._best_solution_fragments: List[Fragment] = list()
+        if calculate_solutions:
+            # Check to see if saved solution better than current best solution
+            total_solution_value = 0
             for group in Group.groups:
-                mdrp._best_solution_fragments += saved_solution[group][2]
-            mdrp._best_solution_group_values = {group: saved_solution[group][0] for group in Group.groups}
-        else:
+                total_solution_value += saved_solution[group][0] + saved_solution[group][1]
+            for order in Order.orders:
+                if model.cbGetSolution(order_variables[order]) < 0.1:
+                    total_solution_value += 10000
+            summary_string += f'{total_solution_value}'
+            if total_solution_value + 0.01 < mdrp._best_solution_value:
+                summary_string += ' (saved)'
+                if not summary_output:
+                    print(f'New solution of {total_solution_value} best found so far')
+                mdrp._best_solution_value = total_solution_value
+                mdrp._best_solution_fragments: List[Fragment] = list()
+                for group in Group.groups:
+                    mdrp._best_solution_fragments += saved_solution[group][2]
+                mdrp._best_solution_group_values = {group: saved_solution[group][0] for group in Group.groups}
+            else:
+                if not summary_output:
+                    print(f'New solution of {total_solution_value} not best solution')
             if not summary_output:
-                print(f'New solution of {total_solution_value} not best solution')
-        if not summary_output:
-            print('-' * 50)
+                print('-' * 50)
+        else:
+            summary_string += "rejected"
         if summary_output:
             print(f't = {get_program_run_time()}, {summary_string}')
 
