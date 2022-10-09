@@ -804,10 +804,22 @@ def callback(model: Model, where: int) -> None:
             calculate_solutions = True
         else:
             calculate_solutions = False
+
         gurobi_model_objective = model.cbGet(GRB.Callback.MIPSOL_OBJ)
+
         if gurobi_model_objective > model._best_solution_value + 0.01:
+            summary_string = f'{round(gurobi_model_objective)} (rejected)'
             calculate_solutions = False
-        summary_string = f'{gurobi_model_objective} -> '
+        else:
+            summary_string = f'{round(gurobi_model_objective)} -> '
+
+            # There is some gap between the best found solution and the current
+            # solution being investigated. Keep track of this gap, and if the
+            # gap decreases below 0, do not suggest this solution to gurobi
+            gap_between_found_and_best_solutions = model._best_solution_value - gurobi_model_objective
+            if gap_between_found_and_best_solutions < 0.01:
+                gap_between_found_and_best_solutions = 0
+
         if not summary_output:
             print('-' * 50)
             print(f'Checking found solution of value {model.cbGet(GRB.Callback.MIPSOL_OBJ)}')
@@ -824,7 +836,7 @@ def callback(model: Model, where: int) -> None:
             gurobi_solution_group_fragments: Set[Fragment] = set()
             gurobi_solution_group_orders: Set[Order] = set()
             gurobi_solution_group_arcs: Set[Arc] = set()
-            gurobi_solution_objective = model.cbGetSolution(payment_variables[group])
+            gurobi_solution_group_objective = model.cbGetSolution(payment_variables[group])
             for i in range(len(group_fragments_solutions)):
                 if group_fragments_solutions[i] > 0.9:
                     gurobi_solution_group_fragments.add(group_fragments[i])
@@ -843,7 +855,7 @@ def callback(model: Model, where: int) -> None:
                 subnetwork = model._solved_subproblems[(group, frozenset(gurobi_solution_group_orders))]
                 best_possible_solution_value = subnetwork.get_best_objective()
                 extra_costs = subnetwork.get_undelivered_orders_cost()
-                if best_possible_solution_value + extra_costs > gurobi_solution_objective + 0.01:
+                if best_possible_solution_value + extra_costs > gurobi_solution_group_objective + 0.01:
                     if not summary_output:
                         print(f'Found solution too low, adding optimality cut of {best_possible_solution_value}')
                     add_lazy_optimality_cut_on_orders(model, group, frozenset(gurobi_solution_group_orders),
@@ -852,7 +864,7 @@ def callback(model: Model, where: int) -> None:
                 else:
                     if not summary_output:
                         print(f'Gurobi solution fine')
-                    saved_solution[group] = (gurobi_solution_objective, 0, gurobi_solution_group_fragments)
+                    saved_solution[group] = (gurobi_solution_group_objective, 0, gurobi_solution_group_fragments)
 
             else:
                 # Solve UFModel on arcs, and add optimality/feasibility cut if necessary
@@ -862,7 +874,7 @@ def callback(model: Model, where: int) -> None:
                 if subproblem.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
                     # Add an optimality cut if necessary, else save gurobi's solution
                     objective_value = subproblem.getAttr(GRB.Attr.ObjVal)
-                    if objective_value > gurobi_solution_objective + 0.01:
+                    if objective_value > gurobi_solution_group_objective + 0.01:
                         # Add an optimality cut
                         if not summary_output:
                             print('Gurobi solution too low, adding optimality cut on arcs')
@@ -872,7 +884,7 @@ def callback(model: Model, where: int) -> None:
                     else:
                         if not summary_output:
                             print('Gurobi solution optimal on arcs')
-                        saved_solution[group] = (gurobi_solution_objective, 0, gurobi_solution_group_fragments)
+                        saved_solution[group] = (gurobi_solution_group_objective, 0, gurobi_solution_group_fragments)
 
                 else:
                     # subproblem infeasible, add feasibility cut
@@ -917,6 +929,8 @@ def callback(model: Model, where: int) -> None:
                 if not summary_output:
                     print(f'Found {no_of_solutions} solutions')
                 if no_of_solutions == 0:
+                    calculate_solutions = False
+                    summary_string += f'rejected (no solutions found for {group})'
                     continue
 
                 # Add feasibility cuts if necessary
@@ -960,6 +974,16 @@ def callback(model: Model, where: int) -> None:
                             print(f'Added optimality cut on fragments of value {objective_value}')
                         add_lazy_optimality_cut_on_fragments(model, group, solution_fragments, objective_value)
 
+                difference = objective_value + extra_costs - gurobi_solution_group_objective
+                if difference > 0.01:
+                    gurobi_model_objective += difference
+                    # Gap between current solution and best solution decreases
+                    gap_between_found_and_best_solutions -= difference
+                    if gap_between_found_and_best_solutions < 0.01:
+                        calculate_solutions = False
+                        summary_string += f'{round(gurobi_model_objective)}+ (rejected)'
+                        continue
+
                 # Solved to optimality, save submodel
                 if submodel.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
                     if not summary_output:
@@ -975,7 +999,7 @@ def callback(model: Model, where: int) -> None:
             for order in Order.orders:
                 if model.cbGetSolution(order_variables[order]) < 0.1:
                     total_solution_value += 10000
-            summary_string += f'{total_solution_value}'
+            summary_string += f'{round(total_solution_value)}'
             if total_solution_value + 0.01 < mdrp._best_solution_value:
                 summary_string += ' (saved)'
                 if not summary_output:
@@ -990,8 +1014,6 @@ def callback(model: Model, where: int) -> None:
                     print(f'New solution of {total_solution_value} not best solution')
             if not summary_output:
                 print('-' * 50)
-        else:
-            summary_string += "rejected"
         if summary_output:
             print(f't = {get_program_run_time()}, {summary_string}')
 
@@ -1016,7 +1038,7 @@ def callback(model: Model, where: int) -> None:
                     for fragment in activated_fragments:
                         print(fragment)
             else:
-                print(f'Suggested {mdrp._best_solution_value}')
+                print(f'Suggested {round(mdrp._best_solution_value)}')
 
 
 # mdrp.setParam('TuneTimeLimit', 36000)
