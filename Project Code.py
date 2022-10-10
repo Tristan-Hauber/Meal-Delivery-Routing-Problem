@@ -917,6 +917,12 @@ def callback(model: Model, where: int) -> None:
                     submodel.setParam('TimeLimit', submodel.getParamInfo('TimeLimit')[2] + 10)
                 submodel.optimize()
 
+                no_of_solutions = submodel.getAttr(GRB.Attr.SolCount)
+                while no_of_solutions == 0:
+                    submodel.setParam('TimeLimit', submodel.getParamInfo('TimeLimit')[2] + 10)
+                    submodel.optimize()
+                    no_of_solutions = submodel.getAttr(GRB.Attr.SolCount)
+
                 if not summary_output:
                     if submodel.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
                         print('Found optimal solution on group')
@@ -925,7 +931,6 @@ def callback(model: Model, where: int) -> None:
                     else:
                         print(f'Status = {submodel.getAttr(GRB.Attr.Status)}')
 
-                no_of_solutions = submodel.getAttr(GRB.Attr.SolCount)
                 if not summary_output:
                     print(f'Found {no_of_solutions} solutions')
                 if no_of_solutions == 0:

@@ -232,6 +232,7 @@ class UntimedFragmentsMDRP(Model):
             )
             for (arc1, arc2) in self._successors
             for courier in self._couriers_for_arc[arc1]
+            if courier in self._couriers_for_arc[arc2]
         }
         # An arc must be serviced after it is ready
         self._begin_on_time = {
