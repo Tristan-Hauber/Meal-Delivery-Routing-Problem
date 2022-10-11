@@ -750,6 +750,7 @@ class Arc:
             Dominate the given list of arcs and return all dominated arcs.
     """
 
+    _arcs_by_group = dict()
     arcs = set()
     arcs_by_group_and_order_set_and_arrival_location = dict()
     arcs_by_group_and_arrival_location = dict()
@@ -1050,6 +1051,16 @@ class Arc:
         for arc in arcs:
             successors.union(arc.get_succ())
         return successors
+
+    @staticmethod
+    def get_arcs_for_group(group: Group) -> Set[Arc]:
+        """Get all arcs belonging to the given network"""
+        if group not in Arc._arcs_by_group:
+            Arc._arcs_by_group[group] = set()
+            for arc in Arc.arcs:
+                if arc.group == group:
+                    Arc._arcs_by_group[group].add(arc)
+        return Arc._arcs_by_group[group]
 
 
 class Node:
@@ -1389,7 +1400,8 @@ class Fragment:
         for fragment in Fragment.fragments_by_arc[arc]:
             if fragment.departure_node == departure_node:
                 return fragment
-        assert False
+        else:
+            assert False
 
     def __str__(self):
         """Return str(self)."""
