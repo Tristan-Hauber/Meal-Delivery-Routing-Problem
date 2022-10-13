@@ -351,6 +351,62 @@ class UntimedFragmentsMDRP(Model):
                 infeasible_arcs.append(arc2)
         return infeasible_arcs
 
+    def print_infeasible_constraints(self) -> None:
+        """Print the name of all IIS constraints."""
+        self.computeIIS()
+        print("\nIIS Constraints include:")
+        for courier in self._delivery_payments:
+            if self._delivery_payments[courier].IISConstr:
+                print("Delivery payment constraints")
+                break
+        for courier in self._time_payments:
+            if self._time_payments[courier].IISConstr:
+                print("Time payment constraints")
+                break
+        for order in self._deliver_orders:
+            if self._deliver_orders[order].IISConstr:
+                print("Order delivery constraints")
+                break
+        for order in self._delivered:
+            if self._delivered[order].IISConstr:
+                print("Order servicing constraints")
+                break
+        for arc in self._arcs_covered:
+            if self._arcs_covered[arc].IISConstr:
+                print("Arc servicing constraints")
+                break
+        for arc in self._has_successor:
+            if self._has_successor[arc].IISConstr:
+                print("Arc requires successor constraints")
+                break
+        for arc in self._has_predecessor:
+            if self._has_predecessor[arc].IISConstr:
+                print("Arc requires predecessor constraints")
+                break
+        for (arc1, arc2) in self._successor_timings:
+            if self._successor_timings[(arc1, arc2)].IISConstr:
+                print("Arc successor timing constraints")
+                break
+        for (arc1, arc2, courier) in self._courier_service_successor:
+            if self._courier_service_successor[(arc1, arc2, courier)].IISConstr:
+                print("Courier service successor constraints")
+                break
+        for arc in self._begin_on_time:
+            if self._begin_on_time[arc].IISConstr:
+                print("Arc earliest departure time constraints")
+                break
+        for arc in self._begin_in_time:
+            if self._begin_in_time[arc].IISConstr:
+                print("Arc latest departure time constraints")
+                break
+        for courier in self._start_once:
+            if self._start_once[courier].IISConstr:
+                print("Couriers start once constraints")
+                break
+        if self._in_equals_out.IISConstr:
+            print("Network flow constraint")
+        print()
+
     def optimize(self):
         super().optimize()
         # print(f'Optimisation complete, t={math.ceil(time.time() - self._model_initiation)}')

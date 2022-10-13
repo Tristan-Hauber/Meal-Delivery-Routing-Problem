@@ -701,6 +701,7 @@ for courier in courier_variables:
 
 mdrp._best_solution_value = GRB.INFINITY
 mdrp._solved_subproblems = dict()
+mdrp._subproblem_gurobi_time = 0.0
 
 
 def get_length_of_order_overlap(fragment: Fragment, orders: FrozenSet[Order]) -> int:
@@ -871,6 +872,7 @@ def callback(model: Model, where: int) -> None:
                 subproblem = UntimedFragmentsMDRP(group, list(gurobi_solution_group_arcs),
                                                   list(gurobi_solution_group_orders))
                 subproblem.optimize()
+                model._subproblem_gurobi_time += subproblem.getAttr("Runtime")
                 if subproblem.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
                     # Add an optimality cut if necessary, else save gurobi's solution
                     objective_value = subproblem.getAttr(GRB.Attr.ObjVal)
@@ -894,6 +896,7 @@ def callback(model: Model, where: int) -> None:
                     infeasible_arcs = subproblem._arcs
                     model.cbLazy(quicksum(fragment_variables[fragment] for arc in infeasible_arcs for fragment in Fragment.fragments_by_arc[arc])
                                  <= len(infeasible_arcs) - 1)
+                    # subproblem.print_infeasible_constraints()
                     # infeasible_arcs = subproblem.get_infeasible_arcs()
                     # add_lazy_feasibility_predecessor_cut_on_arcs(model, set(infeasible_arcs), gurobi_solution_group_arcs)
                     saved_solution[group] = (0, 10000 * len(gurobi_solution_group_orders), set())
@@ -922,6 +925,7 @@ def callback(model: Model, where: int) -> None:
                     submodel.setParam('TimeLimit', submodel.getParamInfo('TimeLimit')[2] + 10)
                     submodel.optimize()
                     no_of_solutions = submodel.getAttr(GRB.Attr.SolCount)
+                model._subproblem_gurobi_time += submodel.getAttr("Runtime")
 
                 if not summary_output:
                     if submodel.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
@@ -1050,6 +1054,7 @@ def callback(model: Model, where: int) -> None:
 # mdrp.tune()
 mdrp.optimize(callback)
 print(f"\nProgram finished running at t = {get_program_run_time()}")
+# print(f'Gurobi spent {round(mdrp._subproblem_gurobi_time)} seconds in the callback.')
 
 
 
