@@ -262,6 +262,8 @@ cost_penalty_active = True
 
 group_by_off_time = True
 
+maximum_sequence_length = 2
+
 """ ========== Valid Inequalities ========== """
 add_valid_inequality_to_model = False
 add_valid_inequality_after_LP = False
@@ -346,7 +348,7 @@ for restaurant in Restaurant.restaurants:
             sequence = work_area[0]
             work_area.remove(sequence)
             for order in restaurant.orders:
-                if order not in sequence.order_list:
+                if order not in sequence.order_list and len(sequence.order_list) < maximum_sequence_length:
                     new_sequence = sequence.add_order(order)
                     if (
                             new_sequence.latest_departure_time
