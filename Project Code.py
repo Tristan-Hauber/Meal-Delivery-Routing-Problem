@@ -226,7 +226,8 @@ from classes import (
 )
 from typing import Set, Dict, Tuple, FrozenSet, List
 from network import SubNetwork
-from untimed_fragments_mdrp import UntimedFragmentsMDRP, ArcModelNoCourierAssignments
+from untimed_fragments_mdrp import UntimedFragmentsMDRP
+from uf_mdrp_courier_successors import UFMDRP2
 
 # Epoch time from program start
 program_start_time = time.time()
@@ -263,6 +264,7 @@ cost_penalty_active = True
 group_by_off_time = True
 
 maximum_sequence_length = 2
+submodel_model = "Original"
 
 """ ========== Valid Inequalities ========== """
 add_valid_inequality_to_model = False
@@ -871,7 +873,11 @@ def callback(model: Model, where: int) -> None:
 
             else:
                 # Solve UFModel on arcs, and add optimality/feasibility cut if necessary
-                subproblem = UntimedFragmentsMDRP(group, list(gurobi_solution_group_arcs),
+                if submodel_model == "Original":
+                    subproblem = UntimedFragmentsMDRP(group, list(gurobi_solution_group_arcs),
+                                                  list(gurobi_solution_group_orders))
+                else:
+                    subproblem = UFMDRP2(group, list(gurobi_solution_group_arcs),
                                                   list(gurobi_solution_group_orders))
                 subproblem.optimize()
                 model._subproblem_gurobi_time += subproblem.getAttr("Runtime")
@@ -909,10 +915,17 @@ def callback(model: Model, where: int) -> None:
                 # Solve UFModel on orders, and add optimality/feasibility cut if necessary
                 if not summary_output:
                     print(f'Looking for better solutions on orders for {group}')
-                submodel = UntimedFragmentsMDRP.get_arc_model(group, list(gurobi_solution_group_orders))
+                if submodel_model == "Original":
+                    submodel = UntimedFragmentsMDRP.get_arc_model(group, list(gurobi_solution_group_orders))
+                else:
+                    submodel = UFMDRP2.get_arc_model(group, list(gurobi_solution_group_orders))
                 if submodel is None:
                     group_arcs = Arc.get_arcs_with_orders(list(gurobi_solution_group_orders), group)
-                    submodel = UntimedFragmentsMDRP(group, group_arcs, list(gurobi_solution_group_orders),
+                    if submodel_model == "Original":
+                        submodel = UntimedFragmentsMDRP(group, group_arcs, list(gurobi_solution_group_orders),
+                                                    cost_penalty_active=True, time_limit=10, save_model=True)
+                    else:
+                        submodel = UFMDRP2(group, group_arcs, list(gurobi_solution_group_orders),
                                                     cost_penalty_active=True, time_limit=10, save_model=True)
                     if not summary_output:
                         print(f'Created new submodel on {gurobi_solution_group_orders}')
@@ -1056,7 +1069,7 @@ def callback(model: Model, where: int) -> None:
 # mdrp.tune()
 mdrp.optimize(callback)
 print(f"\nProgram finished running at t = {get_program_run_time()}")
-# print(f'Gurobi spent {round(mdrp._subproblem_gurobi_time)} seconds in the callback.')
+print(f'Gurobi spent {round(mdrp._subproblem_gurobi_time)} seconds in the callback.')
 
 
 
