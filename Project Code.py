@@ -224,10 +224,12 @@ from classes import (
     Node,
     Fragment,
 )
-from typing import Set, Dict, Tuple, FrozenSet, List
+from typing import Set, Dict, Tuple, FrozenSet, List, Optional
 from network import SubNetwork
 from untimed_fragments_mdrp import UntimedFragmentsMDRP
 from uf_mdrp_courier_successors import UFMDRP2
+from uf_mdrp_3 import UFMDRP3
+import solution_checker
 
 # Epoch time from program start
 program_start_time = time.time()
@@ -237,7 +239,7 @@ file_directory = "MealDeliveryRoutingGithub/public_instances/" + grubhub_instanc
 
 node_at_order_times = True
 # TODO: implement this switch
-time_discretisation = 10
+time_discretisation = 1
 
 reduce_orders = True
 order_range_start = 1
@@ -264,12 +266,21 @@ cost_penalty_active = True
 group_by_off_time = True
 
 maximum_sequence_length = 2
-submodel_model = "Original"
+submodel_version = 1
+
+if submodel_version == 1:
+    SubModel = UntimedFragmentsMDRP
+elif submodel_version == 2:
+    SubModel = UFMDRP2
+elif submodel_version == 3:
+    SubModel = UFMDRP3
+else:
+    assert False
 
 """ ========== Valid Inequalities ========== """
 add_valid_inequality_to_model = False
 add_valid_inequality_after_LP = False
-add_valid_inequality_to_callback = True
+add_valid_inequality_to_callback = False
 
 suggest_and_repair_solutions = True
 
@@ -279,11 +290,9 @@ log_find_and_suggest_solutions = True
 log_constraint_additions = True
 
 
-
-
-def get_program_run_time() -> int:
+def get_program_run_time() -> float:
     """Return the duration of the program as an integer."""
-    return math.ceil(time.time() - program_start_time)
+    return round(time.time() - program_start_time, 2)
 
 
 with open(file_directory + "instance_parameters.txt") as instance_parameters:
@@ -729,17 +738,19 @@ def add_lazy_optimality_cut_on_arcs(model: Model, group: Group, arcs: FrozenSet[
     cut_fragments = Fragment.get_fragments_from_arcs(list(arcs))
     model.cbLazy(
         payment_variables[group] >= objective * (
-                    quicksum(fragment_variables[fragment] for fragment in cut_fragments) - len(arcs) + 1))
+                quicksum(fragment_variables[fragment] for fragment in cut_fragments) - len(arcs) + 1))
 
 
-def add_lazy_optimality_cut_on_fragments(model: Model, group: Group, fragments: FrozenSet[Fragment], objective: float) -> None:
+def add_lazy_optimality_cut_on_fragments(model: Model, group: Group, fragments: FrozenSet[Fragment],
+                                         objective: float) -> None:
     """Add a lazy optimality cut on the given fragments, for the given model."""
     model.cbLazy(
         payment_variables[group] >= objective * (
-                    quicksum(fragment_variables[fragment] for fragment in fragments) - len(fragments) + 1))
+                quicksum(fragment_variables[fragment] for fragment in fragments) - len(fragments) + 1))
 
 
-def add_lazy_feasibility_predecessor_cut_on_arcs(model: Model, infeasible_arcs: Set[Arc], activated_arcs: Set[Arc]) -> None:
+def add_lazy_feasibility_predecessor_cut_on_arcs(model: Model, infeasible_arcs: Set[Arc],
+                                                 activated_arcs: Set[Arc]) -> None:
     """
     Add a lazy feasibility cut on the given infeasible_arcs, for the given model.
 
@@ -754,6 +765,7 @@ def add_lazy_feasibility_predecessor_cut_on_arcs(model: Model, infeasible_arcs: 
     model.cbLazy(quicksum(fragment_variables[fragment] for fragment in fragments_for_cut)
                  <= len(fragments_for_cut) - 1
                  + quicksum(fragment_variables[fragment] for fragment in alternative_fragments))
+
 
 def add_lazy_feasibility_cut_on_orders(model: Model, group: Group, feasible_orders: Set[Order],
                                        infeasible_orders: Set[Order]) -> None:
@@ -813,10 +825,10 @@ def callback(model: Model, where: int) -> None:
         gurobi_model_objective = model.cbGet(GRB.Callback.MIPSOL_OBJ)
 
         if gurobi_model_objective > model._best_solution_value + 0.01:
-            summary_string = f'{round(gurobi_model_objective)} (rejected)'
+            summary_string = f'{round(gurobi_model_objective, 2)} (rejected)'
             calculate_solutions = False
         else:
-            summary_string = f'{round(gurobi_model_objective)} -> '
+            summary_string = f'{round(gurobi_model_objective, 2)} -> '
 
             # There is some gap between the best found solution and the current
             # solution being investigated. Keep track of this gap, and if the
@@ -844,89 +856,92 @@ def callback(model: Model, where: int) -> None:
             gurobi_solution_group_objective = model.cbGetSolution(payment_variables[group])
             for i in range(len(group_fragments_solutions)):
                 if group_fragments_solutions[i] > 0.9:
-                    gurobi_solution_group_fragments.add(group_fragments[i])
-                    gurobi_solution_group_arcs.add(group_fragments[i].arc)
-                    for order in group_fragments[i].order_list:
-                        gurobi_solution_group_orders.add(order)
+                    fragment = group_fragments[i]
+                    gurobi_solution_group_fragments.add(fragment)
+                    if fragment.departure_location != fragment.arrival_location or len(fragment.order_list) > 0:
+                        gurobi_solution_group_arcs.add(group_fragments[i].arc)
+                        for order in group_fragments[i].order_list:
+                            gurobi_solution_group_orders.add(order)
             if not summary_output:
                 print(f'Gurobi assigned orders: {gurobi_solution_group_orders}')
 
-            # check if (group, orders) pair already considered
-            if (group, frozenset(gurobi_solution_group_orders)) in mdrp._solved_subproblems:
-                if not summary_output:
-                    print(f'Already solved on {(group, gurobi_solution_group_orders)}, comparing with existing solution')
-                # if group objective value too low, add cut and suggest saved solution
-                # if group objective is fine, save existing solution
-                subnetwork = model._solved_subproblems[(group, frozenset(gurobi_solution_group_orders))]
-                best_possible_solution_value = subnetwork.get_best_objective()
-                extra_costs = subnetwork.get_undelivered_orders_cost()
-                if best_possible_solution_value + extra_costs > gurobi_solution_group_objective + 0.01:
+            """
+            Check for feasibility and optimality of subproblem.
+            
+            Put subproblem through the submodel. If comes out infeasible, add
+            a feasibility cut. If comes out feasible but under-estimates the
+            objective, add an optimality cut. Both cuts are done on arcs.
+            
+            Once cuts have been made, we can then move on to suggesting and
+            repairing solutions. 
+            """
+
+            # Solve UFModel on arcs, and add optimality/feasibility cut if necessary
+            subproblem = SubModel(group, list(gurobi_solution_group_arcs),
+                                  list(gurobi_solution_group_orders))
+            subproblem.optimize()
+            model._subproblem_gurobi_time += subproblem.getAttr("Runtime")
+            if subproblem.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
+                # Add an optimality cut if necessary, else save gurobi's solution
+                objective_value = subproblem.getAttr(GRB.Attr.ObjVal)
+                if objective_value > gurobi_solution_group_objective + 0.01:
+                    # Add an optimality cut
                     if not summary_output:
-                        print(f'Found solution too low, adding optimality cut of {best_possible_solution_value}')
-                    add_lazy_optimality_cut_on_orders(model, group, frozenset(gurobi_solution_group_orders),
-                                                      best_possible_solution_value)
-                    saved_solution[group] = (best_possible_solution_value, extra_costs, subnetwork.get_best_fragments())
+                        print('Gurobi solution too low, adding optimality cut on arcs')
+                    add_lazy_optimality_cut_on_arcs(model, group, frozenset(gurobi_solution_group_arcs),
+                                                    objective_value)
+                    saved_solution[group] = (objective_value, 0, subproblem.convert_to_timed_path_fragments())
                 else:
                     if not summary_output:
-                        print(f'Gurobi solution fine')
+                        print('Gurobi solution optimal on arcs')
                     saved_solution[group] = (gurobi_solution_group_objective, 0, gurobi_solution_group_fragments)
 
             else:
-                # Solve UFModel on arcs, and add optimality/feasibility cut if necessary
-                if submodel_model == "Original":
-                    subproblem = UntimedFragmentsMDRP(group, list(gurobi_solution_group_arcs),
-                                                  list(gurobi_solution_group_orders))
-                else:
-                    subproblem = UFMDRP2(group, list(gurobi_solution_group_arcs),
-                                                  list(gurobi_solution_group_orders))
-                subproblem.optimize()
-                model._subproblem_gurobi_time += subproblem.getAttr("Runtime")
-                if subproblem.getAttr(GRB.Attr.Status) == GRB.OPTIMAL:
-                    # Add an optimality cut if necessary, else save gurobi's solution
-                    objective_value = subproblem.getAttr(GRB.Attr.ObjVal)
-                    if objective_value > gurobi_solution_group_objective + 0.01:
-                        # Add an optimality cut
-                        if not summary_output:
-                            print('Gurobi solution too low, adding optimality cut on arcs')
-                        add_lazy_optimality_cut_on_arcs(model, group, frozenset(gurobi_solution_group_arcs),
-                                                        objective_value)
-                        saved_solution[group] = (objective_value, 0, subproblem.convert_to_timed_path_fragments())
-                    else:
-                        if not summary_output:
-                            print('Gurobi solution optimal on arcs')
-                        saved_solution[group] = (gurobi_solution_group_objective, 0, gurobi_solution_group_fragments)
+                # subproblem infeasible, add feasibility cut
+                assert subproblem.getAttr(GRB.Attr.Status) == GRB.INFEASIBLE
+                if not summary_output:
+                    print('Gurobi solution infeasible, adding feasibility cut on arcs')
+                infeasible_arcs = subproblem._arcs
+                # No-good feasibility cut
+                model.cbLazy(quicksum(fragment_variables[fragment] for arc in infeasible_arcs for fragment in
+                                      Fragment.fragments_by_arc[arc])
+                             <= len(infeasible_arcs) - 1)
+                saved_solution[group] = (group.get_total_on_time() / 60 * Data.MIN_PAY_PER_HOUR, 10000 * len(gurobi_solution_group_orders), set())
 
-                else:
-                    # subproblem infeasible, add feasibility cut
-                    assert subproblem.getAttr(GRB.Attr.Status) == GRB.INFEASIBLE
-                    if not summary_output:
-                        print('Gurobi solution infeasible, adding feasibility cut on arcs')
-                    infeasible_arcs = subproblem._arcs
-                    model.cbLazy(quicksum(fragment_variables[fragment] for arc in infeasible_arcs for fragment in Fragment.fragments_by_arc[arc])
-                                 <= len(infeasible_arcs) - 1)
-                    # subproblem.print_infeasible_constraints()
-                    # infeasible_arcs = subproblem.get_infeasible_arcs()
-                    # add_lazy_feasibility_predecessor_cut_on_arcs(model, set(infeasible_arcs), gurobi_solution_group_arcs)
-                    saved_solution[group] = (0, 10000 * len(gurobi_solution_group_orders), set())
+            """
+            Suggest master problem solutions to Gurobi.
+            
+            Only do this if the parameter 'suggest_solutions' is True. If the
+            subproblem has already been solved, then we retrieve that solution
+            to the subproblem. If it hasn't yet been solved, then we solve it.
+            
+            Add feasibility and optimality cuts on the orders where necessary.
+            """
+            if not calculate_solutions:
+                continue
+            # check if (group, orders) pair already considered
+            if (group, frozenset(gurobi_solution_group_orders)) in mdrp._solved_subproblems:
+                if not summary_output:
+                    print(f'Already solved on {(group, gurobi_solution_group_orders)}, retrieving solution')
+                # If group objective value too low, add cut and suggest saved solution
+                # If group objective is fine, save existing solution
+                subnetwork = model._solved_subproblems[(group, frozenset(gurobi_solution_group_orders))]
+                objective = subnetwork.get_best_objective()
+                extra_costs = subnetwork.get_undelivered_orders_cost()
+                fragments = subnetwork.get_best_fragments()
+                saved_solution[group] = (objective, extra_costs, fragments)
+                # print("True")
 
-                if not calculate_solutions:
-                    continue
-
+            else:
                 # Solve UFModel on orders, and add optimality/feasibility cut if necessary
                 if not summary_output:
                     print(f'Looking for better solutions on orders for {group}')
-                if submodel_model == "Original":
-                    submodel = UntimedFragmentsMDRP.get_arc_model(group, list(gurobi_solution_group_orders))
-                else:
-                    submodel = UFMDRP2.get_arc_model(group, list(gurobi_solution_group_orders))
+                submodel = SubModel.get_arc_model(group, list(gurobi_solution_group_orders))
                 if submodel is None:
                     group_arcs = Arc.get_arcs_with_orders(list(gurobi_solution_group_orders), group)
-                    if submodel_model == "Original":
-                        submodel = UntimedFragmentsMDRP(group, group_arcs, list(gurobi_solution_group_orders),
-                                                    cost_penalty_active=True, time_limit=10, save_model=True)
-                    else:
-                        submodel = UFMDRP2(group, group_arcs, list(gurobi_solution_group_orders),
-                                                    cost_penalty_active=True, time_limit=10, save_model=True)
+                    submodel = SubModel(group, group_arcs, list(gurobi_solution_group_orders),
+                                        cost_penalty_active=True, time_limit=10, save_model=True,
+                                        output_type="None")
                     if not summary_output:
                         print(f'Created new submodel on {gurobi_solution_group_orders}')
                 else:
@@ -971,10 +986,16 @@ def callback(model: Model, where: int) -> None:
                 extra_costs = 10000 * len(undelivered_orders)
                 objective_value = submodel.getAttr(GRB.Attr.ObjVal) - extra_costs
                 solution_fragments = submodel.convert_to_timed_path_fragments()
+                # print("Hola")
+                # print(objective_value, extra_costs, saved_solution[group])
+                # print(submodel.get_undelivered_orders())
+                # print(submodel._orders)
                 if objective_value + extra_costs + 0.01 < saved_solution[group][0] + saved_solution[group][1]:
                     if not summary_output:
                         print(f'Found solution of {objective_value + extra_costs}, suggesting new solution')
                     saved_solution[group] = (objective_value, extra_costs, solution_fragments)
+                    # print("Hello")
+                    # print(objective_value, extra_costs, solution_fragments)
 
                     """
                     Can I get to the point where I need to add an optimality cut?
@@ -1005,7 +1026,7 @@ def callback(model: Model, where: int) -> None:
                     gap_between_found_and_best_solutions -= difference
                     if gap_between_found_and_best_solutions < 0.01:
                         calculate_solutions = False
-                        summary_string += f'{round(gurobi_model_objective)}+ (rejected)'
+                        summary_string += f'{round(gurobi_model_objective, 2)}+ (rejected)'
                         continue
 
                 # Solved to optimality, save submodel
@@ -1023,7 +1044,7 @@ def callback(model: Model, where: int) -> None:
             for order in Order.orders:
                 if model.cbGetSolution(order_variables[order]) < 0.1:
                     total_solution_value += 10000
-            summary_string += f'{round(total_solution_value)}'
+            summary_string += f'{round(total_solution_value, 2)}'
             if total_solution_value + 0.01 < mdrp._best_solution_value:
                 summary_string += ' (saved)'
                 if not summary_output:
@@ -1046,7 +1067,9 @@ def callback(model: Model, where: int) -> None:
         if mdrp._best_solution_value + 0.01 < model.cbGet(GRB.Callback.MIPNODE_OBJBST):
             if not summary_output:
                 print(f'\nSuggesting solution of {mdrp._best_solution_value} to Gurobi')
+            # print('Best Solution')
             activated_fragments = set(mdrp._best_solution_fragments)
+            # print(activated_fragments)
             deactivated_fragments = set(Fragment.fragments) - activated_fragments
             model.cbSetSolution(list(fragment_variables[fragment] for fragment in activated_fragments),
                                 list(mdrp._best_solution_fragments.count(fragment) for fragment in activated_fragments))
@@ -1058,19 +1081,19 @@ def callback(model: Model, where: int) -> None:
             objVal = model.cbUseSolution()
             if not summary_output:
                 print(f'Gurobi found objective of {objVal}')
-                if objVal > mdrp._best_solution_value + 0.01:
-                    for fragment in activated_fragments:
-                        print(fragment)
             else:
-                print(f'Suggested {round(mdrp._best_solution_value)}')
+                print(f'Suggested {round(mdrp._best_solution_value, 2)}')
+            if objVal > mdrp._best_solution_value + 0.01:
+                print('Infeasible suggested fragment set')
+                for fragment in activated_fragments:
+                    print(fragment)
 
 
 # mdrp.setParam('TuneTimeLimit', 36000)
 # mdrp.tune()
 mdrp.optimize(callback)
 print(f"\nProgram finished running at t = {get_program_run_time()}")
-print(f'Gurobi spent {round(mdrp._subproblem_gurobi_time)} seconds in the callback.')
-
+print(f'Gurobi spent {round(mdrp._subproblem_gurobi_time, 2)} seconds in the callback.')
 
 
 def orders_per_courier():
@@ -1090,3 +1113,22 @@ def orders_per_courier():
             for order in fragment.order_list:
                 orders_per_courier[courier].add(order)
     return orders_per_courier
+
+
+activated_arcs_by_group = {group: list() for group in Group.groups}
+orders_by_group = {group: list() for group in Group.groups}
+for fragment in fragment_variables:
+    if fragment_variables[fragment].x > 0.9:
+        if fragment.departure_location != fragment.arrival_location or len(fragment.order_list) > 0:
+            group = fragment.group
+            activated_arcs_by_group[group].append(fragment.arc)
+            for order in fragment.order_list:
+                orders_by_group[group].append(order)
+
+itineraries = list()
+for group in activated_arcs_by_group:
+    submodel = UntimedFragmentsMDRP(group, activated_arcs_by_group[group], orders_by_group[group])
+    submodel.optimize()
+    itineraries += submodel.get_arc_network_paths()
+
+solution_checker.check_solution(set(Order.orders), itineraries)
