@@ -4,250 +4,80 @@ The main script running the program.
 Created on Fri Feb 18 14:12:40 2022
 
 @author: Tristan
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 The script follows a rough outline:
 1. Import data
-2. Compute sequences
-3. Compute arcs
-4. Create nodes
-5. Create fragments
-6. Create variables
-7. Add objective function
-8. Add constraints
-9. Add callback logic
-10. Optimise model
-11. Convert solution to a readable format
-12. Verify that the solution is in fact, valid
-
-The following is a quick list of existing and planned functionality within the script.
-# Done: Import data
-# Done: Compute possible sequences
-# Done: Create untimed arcs (courier/sequence/restaurant triples)
-# Done: Create nodes per courier
-# Done: Create timed arcs
-# Done: Add model variables
-# Done: Add objective function
-# Done: Add model constraints
-# Done: Solve model
-# Done: Add cost penalty for not delivering orders
-# Done: Add grouping couriers logic
-# Done: Add increased discretisation logic
-
-# Done: Have a node for each order ready time.
-# Done: Create a map: If arrive at a restaruant at time t, snap to time t' (if active order, round down, otherwise, round up)
-# Done: Strengthen constraint 2. Add new variable for if courier starts (Z_c) for example, then possibly sum constraint 2 with constraint 3.
-# Done: Add a variable for courier starting, and change constraint 7 to take into account individual couriers, even in the group stage.
-
-# Done: Add valid inequality logic
-# Done: Remove variables with larger reduced cost.
-# Done: Add only violated valid inequalities in loop
-# Done: Add estimated optimal gurobi parameters
-# TODO: In callback, if only add optimality cuts, check if solution used by gurobi, and if not, suggest it
-# TODO: In callback, if add feasibility cuts, make a trivial solution by removing illegal orders
-# TODO: In callback, if add feasibility cuts, solve mini IP with added fragments for group
-# TODO: Find out why removing the bounds on any variable messes up objective value
+2. Create sets
+3. Create variables
+4. Add objective function
+5. Add constraints
+6. Define callback
+7. Optimise model
+8. Verify validity of solution
 
 Parameters
-----------
-consider_objective: Bool
-
-    False for feasibility, True otherwise.
-
-    This parameter affects the optimisation part of the model. If set to True, the model will solve
-    the problem until it comes to an optimal solution to do with costs. If set to False, the model
-    will only care about feasibility of the problem.
-
-    NOTE: If set to False, parameter cost_penalty_active must be set to False. Otherwise the model
-    will return a null result, that is, the model will not deliver any of the orders.
-
-cost_penalty_active: Bool
-
-    True to allow quick estimation of valid solutions, False otherwise.
-
-    This parameter tells the model if it can consider solutions to the model where not all orders
-    are delivered, at a large cost per order, or if it can only consider solutions where all orders
-    are delivered.
-
-    NOTE: If set to True, parameter consider_objective must be set to True. Otherwise, the model
-    will return a null result, that is, the model will not deliver any of the orders.
-
-courier_range_end: int
-
-    The numeric ID of the first courier to include in the model.
-
-    If parameter reduce_couriers is set to True, then the model will only include couriers whose
-    numeric IDs fall within a run of integers. This run is bounded by parameters
-    courier_range_start and courier_range_end to denote the start and end of this run, respectively.
-
-    For example, if courier_range_start = 1 and courier_range_end = 5, then the model will consider
-    couriers c1, c2, c3, c4 and c5, but will ignore all other couriers when running.
-
-    NOTE: If parameter reduce_couriers = False, this parameter will have no effect.
-
-courier_range_start: int
-
-    The numeric ID of the first courier to include in the model.
-
-    If parameter reduce_couriers is set to True, then the model will only include couriers whose
-    numeric IDs fall within a run of integers. This run is bounded by parameters
-    courier_range_start and courier_range_end to denote the start and end of this run, respectively.
-
-    For example, if courier_range_start = 1 and courier_range_end = 5, then the model will consider
-    couriers c1, c2, c3, c4 and c5, but will ignore all other couriers when running.
-
-    NOTE: If parameter reduce_couriers = False, this parameter will have no effect.
-
-couriers_to_avoid: [int]
-
-    A list of numeric IDs of couriers to avoid.
-
-    If parameter reduce_couriers is set to True, then the model will not include any orders whose
-    numeric IDs fall within couriers_to_avoid.
-
-    For example, if couriers_to_avoid = [1, 3, 5, 7, 9], then the model will not include orders c1,
-    c3, c5, c7 or c9.
-
-    Note: This parameter takes precedence over parameters courier_range_start and courier_range_end.
-    For example, if courier_range_start = 1, courier_range_end = 3 and couriers_to_avoid = [2, 3,
-    4], then the model will only include courier c1.
-
-    Note: If parameter reduce_couriers = False, this parameter will have no effect.
-
-group_couriers: Bool
-
-    True to group couriers by their off time, false otherwise.
-
-    This parameter determines whether the couriers are considered in terms of groups linked by
-    their off times for the purposes of arc, node and fragment generation, or if each courier is
-    considered its own group.
 
 grubhub_instance: str
 
-    A string denoting the instance being modelled.
-
-    An instance string consists of five separate parts. The string takes the format of seed + size
-    + speed + structure + prep. For example, if seed = 0, size = o50, speed = t75, structure = s1
-    and prep = p100, then grubhub_instance = 0o50t75s1p100.
-
-    seed is an integer ranging from 0 through to 9.
-
-    size is either o100, denoting it contains the entire order set, o50, denoting it contains half
-    of the order set, or r50, denoting it contains half of the restaurant set.
-
-    speed is either t100, representing regular relative distances, or t75, representing close
-    relative distances between locations.
-
-    structure is either s1, representing days where couriers have similar shift durations and start
-    and end times, or s2, representing days where couriers have arbitrary shift durations and start
-    and end times.
-
-    prep is either 100, representing low urgency orders or orders with short preparation times, or
-    125, representing high urgency orders or orders with long preparation times.
-
-order_range_end: int
-
-    The numeric ID of the last order to include in the model.
-
-    If parameter reduce_orders is set to True, then the model will only include orders whose
-    numeric IDs fall within a run of integers. This run is bounded by parameters order_range_start
-    and order_range_end to denote the start and end of this run, respectively.
-
-    For example, if order_range_start = 1 and order_range_end = 5, then the model will consider
-    orders o1, o2, o3, o4 and o5, but will ignore all other orders when running.
-
-    NOTE: If parameter reduce_orders = False, this parameter will have no effect.
-
+reduce_orders: Bool
 order_range_start: int
-
-    The numeric ID of the first order to include in the model.
-
-    If parameter reduce_orders is set to True, then the model will only include orders whose
-    numeric IDs fall within a run of integers. This run is bounded by parameters order_range_start
-    and order_range_end to denote the start and end of this run, respectively.
-
-    For example, if order_range_start = 1 and order_range_end = 5, then the model will consider
-    orders o1, o2, o3, o4 and o5, but will ignore all other orders when running.
-
-    NOTE: If parameter reduce_orders = False, this parameter will have no effect.
-
-orders_to_avoid: [int]
-
-    A list of numeric IDs of orders to avoid.
-
-    If parameter reduce_orders is set to True, then the model will not include any orders whose
-    numeric IDs fall within orders_to_avoid.
-
-    For example, if orders_to_avoid = [1, 3, 5, 7, 9], then the model will not include orders o1,
-    o3, o5, o7 or o9.
-
-    Note: This parameter takes precedence over parameters order_range_start and order_range_end.
-    For example, if order_range_start = 1, order_range_end = 3 and orders_to_avoid = [2, 3, 4],
-    then the model will only include order o1.
-
-    Note: If parameter reduce_orders = False, this parameter will have no effect.
+order_range_end: int
+orders_to_avoid: int
 
 reduce_couriers: Bool
+courier_range_start: int
+courier_range_end: int
+couriers_to_avoid: int
 
-    True to ignore some of the couriers in the model, False otherwise.
+maximum_sequence_length: int
 
-reduce_orders: Bool
-
-    True to ignore some of the orders in the model, False otherwise.
-
+node_at_order_times: Bool
 time_discretisation: int
 
-    The amount of time between consecutive nodes with the same restaurant-group pair.
+group_by_off_time: Bool
 
-    This parameter affects the amount of time that passes between two nodes with the same
-    restaurant and courier group coordinates. The minimum value is 1, and the estimated best value
-    for computing time is equal to (2 + Data.PICKUP_SERVICE_TIME + Data.DROPOFF_SERVICE_TIME). Any
-    values higher than the suggested value is at risk of having courier loops introduced in the
-    optimisation part that need to be removed in the callback part.
+consider_objective: Bool
+cost_penalty_active: Bool
+cost_penalty_value: int
 
+add_valid_inequality_to_model: Bool
+add_valid_inequality_after_LP: Bool
+add_valid_inequality_to_callback: Bool
+
+submodel_version: int
+
+suggest_solutions: Bool
+repair_solutions: Bool
+find_new_solutions: Bool
+
+model_output_type = "Summary"
+submodel_output_type = "None"
 """
 
 import time
-import math
-import itertools
 
 from gurobipy import Model, quicksum, GRB
-from classes import (
-    Data,
-    Courier,
-    Order,
-    Restaurant,
-    Group,
-    Sequence,
-    Arc,
-    Node,
-    Fragment,
-)
-from typing import Set, Dict, Tuple, FrozenSet, List, Optional
+from classes import *
+from typing import Set, Dict, Tuple, FrozenSet, List
 from network import SubNetwork
 from untimed_fragments_mdrp import UntimedFragmentsMDRP
 from uf_mdrp_courier_successors import UFMDRP2
 from uf_mdrp_3 import UFMDRP3
 import solution_checker
 
-# Epoch time from program start
 program_start_time = time.time()
+
+""" ========== INSTANCE PARAMETERS ========== """
 grubhub_instance = "0o50t75s1p100"
-# The directory containing the instance data
 file_directory = "MealDeliveryRoutingGithub/public_instances/" + grubhub_instance + "/"
-
-node_at_order_times = True
-# TODO: implement this switch
-time_discretisation = 1
-
+# Order Generation
 reduce_orders = True
 order_range_start = 1
-order_range_end = 50
+order_range_end = 20
 orders_to_avoid = set()
-
+# Courier Generation
 reduce_couriers = True
-courier_range_start = 1  # TODO: Implement this functionality
+courier_range_start = 1
 courier_range_end = 61
 couriers_to_avoid = list(
     (1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
@@ -257,17 +87,28 @@ couriers_to_avoid = list(
      41, 42, 43, 44, 46, 47, 48, 50,
      52, 53, 54, 55, 56, 58, 59, 60,
      61)
-)
-# Necessary couriers: 11, 15, 18, 33, 39, 45, 49, 51, 57
+)  # Necessary couriers: 11, 15, 18, 33, 39, 45, 49, 51, 57
+# Sequence Generation
+maximum_sequence_length = 2
 
+""" ========== MODEL PARAMETERS ========== """
+# Node Generation
+node_at_order_times = True
+time_discretisation = 1
+# Group Generation
+group_by_off_time = True
+# Objective Generation
 consider_objective = True
 cost_penalty_active = True
+cost_penalty_value = 10000
+# Valid Inequalities
+add_valid_inequality_to_model = False
+add_valid_inequality_after_LP = False
+add_valid_inequality_to_callback = False
 
-group_by_off_time = True
-
-maximum_sequence_length = 2
+""" ========== SUBMODEL PARAMETERS ========== """
+# Submodel Formulation
 submodel_version = 1
-
 if submodel_version == 1:
     SubModel = UntimedFragmentsMDRP
 elif submodel_version == 2:
@@ -276,15 +117,15 @@ elif submodel_version == 3:
     SubModel = UFMDRP3
 else:
     assert False
-
-""" ========== Valid Inequalities ========== """
-add_valid_inequality_to_model = False
-add_valid_inequality_after_LP = False
-add_valid_inequality_to_callback = False
-
+# Solution Searching
+suggest_solutions = True
+repair_solutions = False
+find_new_solutions = True
 suggest_and_repair_solutions = True
 
-# Output
+""" ========== OUTPUT ========== """
+model_output_type = "Summary"  # Full, Summary or None
+submodel_output_type = "None"  # Full, Summary or None
 summary_output = True
 log_find_and_suggest_solutions = True
 log_constraint_additions = True
@@ -311,9 +152,13 @@ with open(file_directory + "couriers.txt") as file:
     lines = file.read().splitlines()[1:]
     for line in lines:
         data = line.split("\t")
-        courier_number = int(data[0][1:])
-        if not reduce_couriers or courier_number not in couriers_to_avoid:
-            Courier(data[0], int(data[1]), int(data[2]), int(data[3]), int(data[4]))
+        if reduce_couriers:
+            courier_number = int(data[0][1:])
+            if courier_number in couriers_to_avoid \
+                    or courier_number < courier_range_start \
+                    or courier_number > courier_range_end:
+                continue
+        Courier(data[0], int(data[1]), int(data[2]), int(data[3]), int(data[4]))
 print(f"{len(Courier.couriers)} total couriers")
 
 with open(file_directory + "restaurants.txt") as file:
@@ -329,20 +174,11 @@ with open(file_directory + "orders.txt") as file:
         data = line.split("\t")
         if reduce_orders:
             order_number = int(data[0][1:])
-            if order_number >= order_range_start and order_number <= order_range_end:
-                if order_number not in orders_to_avoid:
-                    Order(
-                        data[0],
-                        int(data[1]),
-                        int(data[2]),
-                        int(data[3]),
-                        data[4],
-                        int(data[5]),
-                    )
-        else:
-            Order(
-                data[0], int(data[1]), int(data[2]), int(data[3]), data[4], int(data[5])
-            )
+            if order_number in orders_to_avoid \
+                    or order_number < order_range_start \
+                    or order_number > order_range_end:
+                continue
+        Order(data[0], int(data[1]), int(data[2]), int(data[3]), data[4], int(data[5]))
 print(f"{len(Order.orders)} total orders")
 print(f"Data import complete at t = {get_program_run_time()}.\n")
 
@@ -378,16 +214,16 @@ print("Creating possible arcs.")
 # Iterate through all restaurants
 # If a restaurant contains an order that can be delivered after sequence, create an arc
 for sequence in Sequence.sequences:
-    if sequence.order_list != []:  # Create delivery sequences
-        for group in Group.groups:
-            earliest_departure_time = group.get_earliest_arrival_at(
+    if len(sequence.order_list) > 0:  # Create delivery sequences
+        for courier_group in Group.groups:
+            earliest_departure_time = courier_group.get_earliest_arrival_at(
                 sequence.departure_location
             )
             if (
-                    group.off_time >= sequence.earliest_departure_time
+                    courier_group.off_time >= sequence.earliest_departure_time
                     and earliest_departure_time <= sequence.latest_departure_time
             ):
-                Arc(group, sequence, group)  # Creation of an exit arc
+                Arc(courier_group, sequence, courier_group)  # Creation of an exit arc
                 for restaurant in Restaurant.restaurants:
                     earliest_arrival_time = (
                             earliest_departure_time
@@ -399,25 +235,25 @@ for sequence in Sequence.sequences:
                         order
                         for order in restaurant.orders
                         if order not in sequence.order_list
-                        and order.earliest_departure_time <= group.off_time
+                        and order.earliest_departure_time <= courier_group.off_time
                         and order.latest_departure_time >= earliest_arrival_time
                     )
                     if len(deliverable_orders) > 0:
-                        Arc(group, sequence, restaurant)
+                        Arc(courier_group, sequence, restaurant)
     else:  # Create wait arcs
         assert type(sequence.departure_location) == Restaurant
         arrival_restaurant: Restaurant
         arrival_restaurant = sequence.departure_location
-        for group in Group.groups:
-            earliest_arrival_time = group.get_earliest_arrival_at(arrival_restaurant)
+        for courier_group in Group.groups:
+            earliest_arrival_time = courier_group.get_earliest_arrival_at(arrival_restaurant)
             deliverable_orders = set(
                 order
                 for order in arrival_restaurant.orders
                 if order.latest_departure_time >= earliest_arrival_time
-                if order.earliest_departure_time <= group.off_time
+                if order.earliest_departure_time <= courier_group.off_time
             )
             if len(deliverable_orders) > 0:
-                Arc(group, sequence, arrival_restaurant)
+                Arc(courier_group, sequence, arrival_restaurant)
 print("Created main, exit and wait arcs.")
 for courier in Courier.couriers:  # entry arcs
     for restaurant in Restaurant.restaurants:
@@ -437,12 +273,12 @@ print("Creating model nodes.")
 # Create a node for each (group, restaurant) pair at every earliest_departure_time of orders at that restaurant.
 # Create a node for each courier at their on time.
 # Create a node for each group at the off time.
-# Node start time = max(group arrival, earliest deliverable order ready time)
-# Node end time = min(group off time, latest deliverable order latest departure time)
-for group in Group.groups:
-    off_time = group.off_time
+# Node start time = max(group arrival, earliest departure time of the earliest deliverable order)
+# Node end time = min(group off time, latest departure time of the latest deliverable order)
+for courier_group in Group.groups:
+    off_time = courier_group.off_time
     for restaurant in Restaurant.restaurants:
-        earliest_arrival_time = group.get_earliest_arrival_at(restaurant)
+        earliest_arrival_time = courier_group.get_earliest_arrival_at(restaurant)
         deliverable_orders = set(
             order
             for order in restaurant.orders
@@ -462,16 +298,24 @@ for group in Group.groups:
                     max(order.latest_departure_time for order in deliverable_orders),
                 )
             )
-            Node(group, restaurant, node_start_time)
-            Node(group, restaurant, node_end_time)
-            for order in deliverable_orders:
-                if order.earliest_departure_time > node_start_time:
-                    Node(group, restaurant, order.earliest_departure_time)
+            if node_at_order_times:
+                Node(courier_group, restaurant, node_start_time)
+                Node(courier_group, restaurant, node_end_time)
+                for order in deliverable_orders:
+                    if order.earliest_departure_time > node_start_time:
+                        Node(courier_group, restaurant, order.earliest_departure_time)
+
+            else:
+                node_time = node_start_time
+                while node_time <= node_end_time:
+                    Node(courier_group, restaurant, node_time)
+                    node_time += time_discretisation
+
 print("Restaurant nodes complete.")
-for group in Group.groups:
-    Node(group, group, group.off_time)
-    for courier in group.couriers:
-        Node(group, courier, courier.on_time)
+for courier_group in Group.groups:
+    Node(courier_group, courier_group, courier_group.off_time)
+    for courier in courier_group.couriers:
+        Node(courier_group, courier, courier.on_time)
 print("Depot nodes complete.")
 print(f"Created {str(len(Node.nodes))} nodes at t = {get_program_run_time()}.\n")
 
@@ -483,10 +327,7 @@ for arc in Arc.arcs:
         (arc.group, arc.departure_location)
     ]
     for node in departure_nodes:
-        if (
-                node.time >= arc.earliest_departure_time
-                and node.time <= arc.latest_departure_time
-        ):
+        if arc.earliest_departure_time <= node.time <= arc.latest_departure_time:
             Fragment(node, arc)
 print("Created path fragments.")
 
@@ -525,17 +366,25 @@ mdrp.setParam("MIPGAP", 0.1)
 # mdrp.setParam('PrePasses', 1)
 
 print("Creating variables.")
-fragment_variables = {fragment: mdrp.addVar() for fragment in Fragment.fragments}
-order_variables = {order: mdrp.addVar() for order in Order.orders}
-payment_variables = {group: mdrp.addVar() for group in Group.groups}
-courier_variables = {courier: mdrp.addVar(ub=1) for courier in Courier.couriers}
+fragment_variables = {fragment: mdrp.addVar(lb=0, ub=GRB.INFINITY, obj=0, vtype=GRB.CONTINUOUS,
+                                            name=f'{fragment} activation variable', column=None)
+                      for fragment in Fragment.fragments}
+order_variables = {order: mdrp.addVar(lb=0, ub=GRB.INFINITY, obj=0, vtype=GRB.CONTINUOUS,
+                                      name=f'{order} delivery variable', column=None)
+                   for order in Order.orders}
+payment_variables = {group: mdrp.addVar(lb=0, ub=GRB.INFINITY, obj=0, vtype=GRB.CONTINUOUS,
+                                        name=f'{group} payment variable', column=None)
+                     for group in Group.groups}
+courier_variables = {courier: mdrp.addVar(lb=0, ub=1, obj=0, vtype=GRB.CONTINUOUS,
+                                          name=f'{courier} start variable', column=None)
+                     for courier in Courier.couriers}
 
 if consider_objective:
     print("Defining objective.")
     if cost_penalty_active:
         mdrp.setObjective(
             quicksum(payment_variables[group] for group in Group.groups)
-            + 10000 * quicksum(1 - order_variables[order] for order in Order.orders)
+            + cost_penalty_value * quicksum(1 - order_variables[order] for order in Order.orders)
         )
     else:
         mdrp.setObjective(quicksum(payment_variables[group] for group in Group.groups))
@@ -555,34 +404,34 @@ if consider_objective:
                 * (courier.off_time - courier.on_time)
                 / 60
                 for courier in group.couriers
-            )
-        )
+            ),
+            name=f'{group} delivery payment constraint')
         for group in Group.groups
     }
 
     pay_for_time = {
         group: mdrp.addConstr(
-            payment_variables[group] >= Data.MIN_PAY_PER_HOUR * group.get_total_on_time() / 60
-        )
+            payment_variables[group] >= Data.MIN_PAY_PER_HOUR * group.get_total_on_time() / 60,
+            name=f'{group} time payment constraint')
         for group in Group.groups
     }
 
 deliver_all_orders = {
     order: mdrp.addConstr(
         quicksum(fragment_variables[fragment] for fragment in Fragment.fragments_by_order[order])
-        == order_variables[order]
-    )
+        == order_variables[order],
+        name=f'{order} delivery constraint')
     for order in Order.orders
 }
 
 if cost_penalty_active is False:
-    all_orders_on = {
-        order: mdrp.addConstr(order_variables[order] == 1) for order in Order.orders
-    }
+    all_orders_on = {order: mdrp.addConstr(order_variables[order] == 1,
+                                           name=f'{order} activation constraint')
+                     for order in Order.orders}
 else:
-    all_orders_on = {
-        order: mdrp.addConstr(order_variables[order] <= 1) for order in Order.orders
-    }
+    all_orders_on = {order: mdrp.addConstr(order_variables[order] <= 1,
+                                           name=f'{order} activation constraint')
+                     for order in Order.orders}
 
 flow_in_equals_flow_out = {
     node: mdrp.addConstr(
@@ -592,8 +441,8 @@ flow_in_equals_flow_out = {
         == quicksum(
             fragment_variables[fragment]
             for fragment in Fragment.fragments_by_departure_node[node]
-        )
-    )
+        ),
+        name=f'{node} flow constraint')
     for node in Node.nodes
     if type(node.location) == Restaurant
 }
@@ -604,8 +453,8 @@ couriers_start_once = {
             fragment_variables[fragment]
             for fragment in Fragment.departure_fragments_by_courier[courier]
         )
-        == courier_variables[courier]
-    )
+        == courier_variables[courier],
+        name=f'{courier} start constraint')
     for courier in Courier.couriers
 }
 
@@ -674,8 +523,8 @@ if add_valid_inequality_after_LP:
                 if pred_values < arc_value - 0.1:
                     predecessor_VI = mdrp.addConstr(
                         quicksum(fragment_variables[fragment] for fragment in pred_fragments)
-                        >= quicksum(fragment_variables[fragment] for fragment in arc_fragments)
-                    )
+                        >= quicksum(fragment_variables[fragment] for fragment in arc_fragments),
+                        name=f'{arc} predecessor VI')
                     VI_added += 1
                     VI.add(predecessor_VI)
             # Add Valid Inequalities (if broken) on successors
@@ -689,8 +538,8 @@ if add_valid_inequality_after_LP:
                 if succ_values < arc_value - 0.1:
                     successor_VI = mdrp.addConstr(
                         quicksum(fragment_variables[fragment] for fragment in succ_fragments)
-                        >= quicksum(fragment_variables[fragment] for fragment in arc_fragments)
-                    )
+                        >= quicksum(fragment_variables[fragment] for fragment in arc_fragments),
+                        name=f'{arc} successor VI')
                     VI_added += 1
                     VI.add(successor_VI)
         print(
@@ -750,7 +599,7 @@ def add_lazy_optimality_cut_on_fragments(model: Model, group: Group, fragments: 
 
 
 def add_lazy_feasibility_predecessor_cut_on_arcs(model: Model, infeasible_arcs: Set[Arc],
-                                                 activated_arcs: Set[Arc]) -> None:
+                                                 all_arcs: Set[Arc]) -> None:
     """
     Add a lazy feasibility cut on the given infeasible_arcs, for the given model.
 
@@ -760,7 +609,7 @@ def add_lazy_feasibility_predecessor_cut_on_arcs(model: Model, infeasible_arcs: 
     """
     fragments_for_cut = set(Fragment.get_fragments_from_arcs(list(infeasible_arcs)))
     arc_predecessors = Arc.get_pred_to_arcs(infeasible_arcs)
-    alternative_predecessors = set(arc_predecessors) - activated_arcs
+    alternative_predecessors = set(arc_predecessors) - all_arcs
     alternative_fragments = Fragment.get_fragments_from_arcs(list(alternative_predecessors))
     model.cbLazy(quicksum(fragment_variables[fragment] for fragment in fragments_for_cut)
                  <= len(fragments_for_cut) - 1
@@ -770,9 +619,9 @@ def add_lazy_feasibility_predecessor_cut_on_arcs(model: Model, infeasible_arcs: 
 def add_lazy_feasibility_cut_on_orders(model: Model, group: Group, feasible_orders: Set[Order],
                                        infeasible_orders: Set[Order]) -> None:
     """Add a lazy feasibility cut on the given orders, for the given model."""
-    for order in infeasible_orders:
+    for inf_order in infeasible_orders:
         orders_for_cut = list(feasible_orders)
-        orders_for_cut.append(order)
+        orders_for_cut.append(inf_order)
         arcs_for_cut = Arc.get_arcs_with_orders(orders_for_cut, group)
         fragments_for_cut = Fragment.get_fragments_from_arcs(arcs_for_cut)
         model.cbLazy(quicksum(fragment_variables[fragment]
@@ -906,7 +755,9 @@ def callback(model: Model, where: int) -> None:
                 model.cbLazy(quicksum(fragment_variables[fragment] for arc in infeasible_arcs for fragment in
                                       Fragment.fragments_by_arc[arc])
                              <= len(infeasible_arcs) - 1)
-                saved_solution[group] = (group.get_total_on_time() / 60 * Data.MIN_PAY_PER_HOUR, 10000 * len(gurobi_solution_group_orders), set())
+                saved_solution[group] = (
+                    group.get_total_on_time() / 60 * Data.MIN_PAY_PER_HOUR, 10000 * len(gurobi_solution_group_orders),
+                    set())
 
             """
             Suggest master problem solutions to Gurobi.
@@ -1041,8 +892,8 @@ def callback(model: Model, where: int) -> None:
             total_solution_value = 0
             for group in Group.groups:
                 total_solution_value += saved_solution[group][0] + saved_solution[group][1]
-            for order in Order.orders:
-                if model.cbGetSolution(order_variables[order]) < 0.1:
+            for solution_order in Order.orders:
+                if model.cbGetSolution(order_variables[solution_order]) < 0.1:
                     total_solution_value += 10000
             summary_string += f'{round(total_solution_value, 2)}'
             if total_solution_value + 0.01 < mdrp._best_solution_value:
@@ -1091,29 +942,12 @@ def callback(model: Model, where: int) -> None:
 
 # mdrp.setParam('TuneTimeLimit', 36000)
 # mdrp.tune()
-mdrp.optimize(callback)
+if group_by_off_time or node_at_order_times or time_discretisation > 1:
+    mdrp.optimize(callback)
+else:
+    mdrp.optimize()
 print(f"\nProgram finished running at t = {get_program_run_time()}")
 print(f'Gurobi spent {round(mdrp._subproblem_gurobi_time, 2)} seconds in the callback.')
-
-
-def orders_per_courier():
-    """
-    Group orders into sets according to their delivery courier.
-
-    Returns
-    -------
-    orders_per_courier : {Courier: {Order}}
-        A dictionary containing the orders delivered by each courier.
-
-    """
-    orders_per_courier = {courier: set() for courier in Courier.couriers}
-    for fragment in Fragment.fragments:
-        if fragment_variables[fragment].x > 0.9:
-            courier = fragment.courier
-            for order in fragment.order_list:
-                orders_per_courier[courier].add(order)
-    return orders_per_courier
-
 
 activated_arcs_by_group = {group: list() for group in Group.groups}
 orders_by_group = {group: list() for group in Group.groups}
